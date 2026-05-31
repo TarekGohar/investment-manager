@@ -416,7 +416,7 @@ export function buildTools(userId: string): ToolDefinition[] {
     {
       name: "get_contribution_room_status",
       description:
-        "TFSA / RRSP / FHSA / RESP contribution room for a given year. Returns each account's user-supplied room available, derived used (sum of BUY transactions in that account this year), remaining, and over-contribution flag. `roomAvailable: null` means the user has not entered their room from CRA's NOA yet — you must NOT guess a CRA limit; instead point them to Settings → Contribution room.",
+        "TFSA / RRSP / FHSA / RESP contribution room for a given year. Returns each account's user-supplied room available, derived used (sum of cash DEPOSIT transactions into that account this year — buying shares with already-deposited cash does NOT use further room), remaining, and over-contribution flag. `roomAvailable: null` means the user has not entered their room from CRA's NOA yet — you must NOT guess a CRA limit; instead point them to Settings → Contribution room.",
       parameters: {
         type: "object",
         properties: {

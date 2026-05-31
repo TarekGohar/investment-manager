@@ -42,7 +42,7 @@ export function ContributionRoomStatusCard({
             <div className="grid grid-cols-[0.7fr_1fr_1fr_1fr_1fr] gap-3 border-t border-border px-4 py-3 text-xs font-semibold uppercase tracking-wide text-muted md:px-6">
               <div>Account</div>
               <div className="text-right">Room available</div>
-              <div className="text-right">Used (BUYs)</div>
+              <div className="text-right">Deposited</div>
               <div className="text-right">Remaining</div>
               <div className="text-right">Utilization</div>
             </div>
@@ -85,9 +85,11 @@ export function ContributionRoomStatusCard({
       )}
 
       <p className="border-t border-border px-4 py-3 text-xs text-muted-2 md:px-6">
-        Used = sum of BUY transactions in that account this year. In-kind
-        transfers between registered accounts are not modelled — adjust the
-        room you enter to compensate.
+        Deposited = sum of cash DEPOSIT transactions into that account this
+        year. Buys with already-deposited cash don&apos;t use further room,
+        and sells don&apos;t free room (TFSA withdrawals free room next
+        year, but that should already be reflected in the &ldquo;Room
+        available&rdquo; number from your NOA).
       </p>
     </section>
   );

@@ -55,20 +55,27 @@ export async function listContributionRooms(userId: string): Promise<Contributio
 }
 
 /**
- * Sum of contribution-using BUY transactions per (kind, year). DIVIDEND,
- * SPLIT, TRANSFER_IN, and TRANSFER_OUT are excluded — DRIPs / in-kind
- * transfers / cross-broker moves don't consume new room.
+ * Sum of DEPOSIT transactions per (kind, year) for TFSA / RRSP / FHSA /
+ * RESP accounts. This is the CRA-correct definition of "contribution room
+ * used": room is consumed when *cash is contributed* to the account, not
+ * when you buy shares with already-contributed cash. A SELL that leaves
+ * the cash in the account doesn't free room (TFSA withdrawals free room
+ * the following year, but that's already reflected in the room number the
+ * user enters from their NOA).
+ *
+ * BUY, SELL, DIVIDEND, SPLIT, TRANSFER_IN/OUT, and WITHDRAWAL are all
+ * excluded — none of them consume new room.
  */
 export function deriveUsedRoomByKindYear(transactions: Tx[]): Map<string, number> {
   const out = new Map<string, number>();
   for (const tx of transactions) {
-    if (tx.kind !== "BUY") continue;
+    if (tx.kind !== "DEPOSIT") continue;
     if (!isRegisteredKind(tx.brokerageKind)) continue;
     if (!isRoomKind(tx.brokerageKind)) continue;
     const year = tx.occurredAt.getUTCFullYear();
     const key = `${tx.brokerageKind}:${year}`;
-    const contribution = tx.quantity * tx.price + tx.fees;
-    out.set(key, (out.get(key) ?? 0) + contribution);
+    // DEPOSIT stores the cash amount in `price`, qty = 1.
+    out.set(key, (out.get(key) ?? 0) + tx.price);
   }
   return out;
 }

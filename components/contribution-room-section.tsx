@@ -65,8 +65,10 @@ export function ContributionRoomSection({
       <p className="text-xs text-muted">
         Pull these numbers from your CRA Notice of Assessment or the MyCRA
         portal. Nothing is assumed — CRA annual limits change year to year and
-        carry-forward depends on your unused room. &ldquo;Used&rdquo; below is
-        derived from BUY transactions in this account for the year.
+        carry-forward depends on your unused room. &ldquo;Deposited&rdquo; on
+        the /tax page is derived from your DEPOSIT transactions into the
+        account — make sure to log a Deposit every time you fund a registered
+        account so the tracker stays accurate.
       </p>
 
       <div className="rounded-[10px] bg-bg/40 px-3 py-3 space-y-3">

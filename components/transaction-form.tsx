@@ -144,28 +144,27 @@ export function TransactionForm({
     };
   }, [kind, ticker, occurredAt]);
 
-  // Pre-trade contribution-room warning — fires when BUY is selected in a
-  // registered (TFSA/RRSP/FHSA/RESP) account and we can size the contribution.
+  // Pre-trade contribution-room warning — fires when DEPOSIT is selected
+  // into a registered (TFSA/RRSP/FHSA/RESP) account. Used room is now
+  // driven by deposits (CRA-correct), so the warning belongs on the
+  // deposit, not on the share BUY.
   useEffect(() => {
-    if (kind !== "BUY" || !selectedBrokerage || !occurredAt) {
+    if (kind !== "DEPOSIT" || !selectedBrokerage || !occurredAt) {
       setRoomCheck(null);
       return;
     }
-    const qN = Number(quantity);
-    const pN = Number(price);
-    const fN = Number(fees);
-    if (!Number.isFinite(qN) || !Number.isFinite(pN) || qN <= 0 || pN < 0) {
+    const aN = Number(amount);
+    if (!Number.isFinite(aN) || aN <= 0) {
       setRoomCheck(null);
       return;
     }
-    const amount = qN * pN + (Number.isFinite(fN) ? fN : 0);
     let cancelled = false;
     const timer = window.setTimeout(async () => {
       try {
         const result = await checkContributionRoomImpactAction(
           selectedBrokerage.id,
           occurredAt,
-          amount,
+          aN,
         );
         if (!cancelled) setRoomCheck(result);
       } catch {
@@ -176,7 +175,7 @@ export function TransactionForm({
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [kind, selectedBrokerage, occurredAt, quantity, price, fees]);
+  }, [kind, selectedBrokerage, occurredAt, amount]);
 
   const showShareFields = kind === "BUY" || kind === "SELL";
   const showAmount = kind === "DIVIDEND" || kind === "DEPOSIT" || kind === "WITHDRAWAL";
@@ -361,35 +360,6 @@ export function TransactionForm({
               </span>
             </div>
           ) : null}
-          {kind === "BUY" && roomCheck?.tracked ? (
-            <div
-              className={`mb-3 rounded-[10px] border px-3 py-2.5 text-xs leading-relaxed ${
-                roomCheck.wouldExceed
-                  ? "border-danger/40 bg-danger/10 text-danger"
-                  : roomCheck.remainingAfter < 1000
-                    ? "border-warning/40 bg-warning/10 text-warning"
-                    : "border-border bg-bg/40 text-muted"
-              }`}
-            >
-              <div className="text-[13px] font-semibold">
-                {roomCheck.wouldExceed
-                  ? `Would exceed ${roomCheck.kind} room`
-                  : `${roomCheck.kind} room · ${roomCheck.year}`}
-              </div>
-              <div className="mt-1">
-                Room available: {formatCurrency(roomCheck.roomAvailable)} ·
-                Used: {formatCurrency(roomCheck.currentUsed)} · Remaining
-                before this BUY: {formatCurrency(roomCheck.remainingBefore)}
-              </div>
-              <div className="mt-1">
-                This contribution: {formatCurrency(roomCheck.proposedAmount)} →{" "}
-                remaining after: {formatCurrency(roomCheck.remainingAfter)}
-                {roomCheck.wouldExceed
-                  ? " — CRA penalises 1%/month on TFSA / FHSA over-contributions."
-                  : ""}
-              </div>
-            </div>
-          ) : null}
           {kind === "BUY" && superficialCheck?.violates ? (
             <div className="mb-3 rounded-[10px] border border-warning/40 bg-warning/10 px-3 py-2.5 text-xs leading-relaxed text-warning">
               <div className="text-[13px] font-semibold">
@@ -450,6 +420,36 @@ export function TransactionForm({
             className={inputClass}
           />
         </Field>
+      ) : null}
+
+      {kind === "DEPOSIT" && roomCheck?.tracked ? (
+        <div
+          className={`mb-3 rounded-[10px] border px-3 py-2.5 text-xs leading-relaxed ${
+            roomCheck.wouldExceed
+              ? "border-danger/40 bg-danger/10 text-danger"
+              : roomCheck.remainingAfter < 1000
+                ? "border-warning/40 bg-warning/10 text-warning"
+                : "border-border bg-bg/40 text-muted"
+          }`}
+        >
+          <div className="text-[13px] font-semibold">
+            {roomCheck.wouldExceed
+              ? `Would exceed ${roomCheck.kind} room`
+              : `${roomCheck.kind} room · ${roomCheck.year}`}
+          </div>
+          <div className="mt-1">
+            Room available: {formatCurrency(roomCheck.roomAvailable)} ·
+            Deposited so far: {formatCurrency(roomCheck.currentUsed)} ·
+            Remaining: {formatCurrency(roomCheck.remainingBefore)}
+          </div>
+          <div className="mt-1">
+            This deposit: {formatCurrency(roomCheck.proposedAmount)} →{" "}
+            remaining after: {formatCurrency(roomCheck.remainingAfter)}
+            {roomCheck.wouldExceed
+              ? " — CRA penalises 1%/month on TFSA / FHSA over-contributions."
+              : ""}
+          </div>
+        </div>
       ) : null}
 
       {showSplit ? (

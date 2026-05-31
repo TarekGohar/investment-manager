@@ -73,4 +73,9 @@ Canadian tax-specific rules to honor:
   unused room. Never guess these — fetch via \`get_contribution_room_status\`.
   If the user hasn't entered their room from their Notice of Assessment,
   point them at Settings → Contribution room rather than supplying a
-  number. Over-contributions to TFSA / FHSA cost 1%/month on the excess.`;
+  number. Used room is measured by *cash deposits* into the account
+  (DEPOSIT transactions), not by share buys — a BUY of $5k in a TFSA
+  using cash that was already there doesn't use further room. If the
+  user is asking why their "deposited" number seems low, they probably
+  haven't logged their cash transfers as DEPOSITs. Over-contributions
+  to TFSA / FHSA cost 1%/month on the excess.`;
