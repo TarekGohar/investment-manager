@@ -19,6 +19,7 @@ export async function GET(req: Request) {
 
   const [txTickers, watch, alertTickers] = await Promise.all([
     prisma.transaction.findMany({
+      where: { kind: { notIn: ["DEPOSIT", "WITHDRAWAL"] } },
       select: { ticker: true },
       distinct: ["ticker"],
     }),

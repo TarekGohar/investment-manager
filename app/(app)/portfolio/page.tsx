@@ -10,6 +10,8 @@ import { getEnrichedPortfolio } from "@/lib/portfolio/queries";
 import { analyzePortfolioLocation } from "@/lib/canadian/location";
 import { getCorrelationMatrix } from "@/lib/portfolio/performance-summary";
 import { CorrelationHeatmap } from "@/components/correlation-heatmap";
+import { getCashBalances, summarizeCash } from "@/lib/portfolio/cash";
+import { CashBalances } from "@/components/cash-balances";
 import { formatCurrency, formatPercent, formatQty, formatSignedCurrency } from "@/lib/format";
 
 export default async function PortfolioPage() {
@@ -17,14 +19,16 @@ export default async function PortfolioPage() {
   if (!session) redirect("/sign-in");
 
   const portfolio = await getEnrichedPortfolio(session.user.id);
-  const [locationOverview, correlation] = await Promise.all([
+  const [locationOverview, correlation, cashBalances] = await Promise.all([
     portfolio.holdings.length > 0
       ? analyzePortfolioLocation(portfolio.holdings)
       : Promise.resolve(null),
     portfolio.holdings.length > 1
       ? getCorrelationMatrix(session.user.id)
       : Promise.resolve(null),
+    getCashBalances(session.user.id),
   ]);
+  const cashSummary = summarizeCash(cashBalances);
 
   if (portfolio.holdings.length === 0) {
     return (
@@ -167,6 +171,10 @@ export default async function PortfolioPage() {
             Prices as of {portfolio.quoteAsOf.toLocaleString()} · Finnhub (15-min delayed)
           </p>
         ) : null}
+
+        <div className="mt-[26px]">
+          <CashBalances summary={cashSummary} />
+        </div>
 
         {correlation ? (
           <div className="mt-[26px]">

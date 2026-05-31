@@ -20,6 +20,8 @@ const KIND_BADGE: Record<Tx["kind"], { label: string; tone: string }> = {
   SPLIT: { label: "Split", tone: "bg-warning/15 text-warning" },
   TRANSFER_IN: { label: "Transfer in", tone: "bg-muted/15 text-muted" },
   TRANSFER_OUT: { label: "Transfer out", tone: "bg-muted/15 text-muted" },
+  DEPOSIT: { label: "Deposit", tone: "bg-success/15 text-success" },
+  WITHDRAWAL: { label: "Withdraw", tone: "bg-warning/15 text-warning" },
 };
 
 function dateLabel(d: Date) {

@@ -18,7 +18,10 @@ function refreshTransactionPaths(ticker: string) {
 const Schema = z
   .object({
     ticker: z.string().trim().toUpperCase().min(1).max(10),
-    kind: z.enum(["BUY", "SELL", "DIVIDEND", "SPLIT", "TRANSFER_IN", "TRANSFER_OUT"]),
+    kind: z.enum([
+      "BUY", "SELL", "DIVIDEND", "SPLIT", "TRANSFER_IN", "TRANSFER_OUT",
+      "DEPOSIT", "WITHDRAWAL",
+    ]),
     quantity: z.coerce.number().nonnegative().optional(),
     price: z.coerce.number().nonnegative().optional(),
     amount: z.coerce.number().nonnegative().optional(),
@@ -48,6 +51,11 @@ const Schema = z
     if (data.kind === "DIVIDEND") {
       if (!data.amount || data.amount <= 0) {
         ctx.addIssue({ code: "custom", path: ["amount"], message: "Dividend amount is required." });
+      }
+    }
+    if (data.kind === "DEPOSIT" || data.kind === "WITHDRAWAL") {
+      if (!data.amount || data.amount <= 0) {
+        ctx.addIssue({ code: "custom", path: ["amount"], message: "Amount is required and must be > 0." });
       }
     }
     if (data.kind === "SPLIT") {
@@ -82,6 +90,12 @@ export async function createTransactionAction(formData: FormData): Promise<Creat
   switch (data.kind) {
     case "DIVIDEND":
       // Store dividend amount in `price`; qty = 1 so totals don't double count
+      qty = 1;
+      price = data.amount!;
+      break;
+    case "DEPOSIT":
+    case "WITHDRAWAL":
+      // Cash flow: amount in `price`, qty = 1, no ticker semantics.
       qty = 1;
       price = data.amount!;
       break;
@@ -141,6 +155,11 @@ export async function updateTransactionAction(
   let splitRatio: number | null = null;
   switch (data.kind) {
     case "DIVIDEND":
+      qty = 1;
+      price = data.amount!;
+      break;
+    case "DEPOSIT":
+    case "WITHDRAWAL":
       qty = 1;
       price = data.amount!;
       break;

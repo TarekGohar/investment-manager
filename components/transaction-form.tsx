@@ -17,7 +17,7 @@ import { useToast } from "@/components/toast-provider";
 import { formatCurrency } from "@/lib/format";
 import type { BrokerageKind } from "@/generated/prisma";
 
-const KINDS = ["BUY", "SELL", "DIVIDEND", "SPLIT"] as const;
+const KINDS = ["BUY", "SELL", "DIVIDEND", "SPLIT", "DEPOSIT", "WITHDRAWAL"] as const;
 type Kind = (typeof KINDS)[number];
 
 const KIND_LABEL: Record<Kind, string> = {
@@ -25,7 +25,11 @@ const KIND_LABEL: Record<Kind, string> = {
   SELL: "Sell",
   DIVIDEND: "Dividend",
   SPLIT: "Split",
+  DEPOSIT: "Deposit",
+  WITHDRAWAL: "Withdraw",
 };
+
+const CASH_TICKER = "$CASH";
 
 const inputClass =
   "w-full rounded-[10px] border border-border bg-bg px-3 py-2.5 text-[15px] outline-none transition-colors placeholder:text-muted-2 focus:border-brand";
@@ -88,8 +92,11 @@ export function TransactionForm({
     return String(initial.price);
   });
   const [amount, setAmount] = useState(() => {
-    if (!initial || initial.kind !== "DIVIDEND") return "";
-    return String(initial.price);
+    if (!initial) return "";
+    if (initial.kind === "DIVIDEND" || initial.kind === "DEPOSIT" || initial.kind === "WITHDRAWAL") {
+      return String(initial.price);
+    }
+    return "";
   });
   const [splitRatio, setSplitRatio] = useState(() => {
     if (!initial || initial.kind !== "SPLIT" || initial.splitRatio == null) return "";
@@ -172,8 +179,10 @@ export function TransactionForm({
   }, [kind, selectedBrokerage, occurredAt, quantity, price, fees]);
 
   const showShareFields = kind === "BUY" || kind === "SELL";
-  const showAmount = kind === "DIVIDEND";
+  const showAmount = kind === "DIVIDEND" || kind === "DEPOSIT" || kind === "WITHDRAWAL";
   const showSplit = kind === "SPLIT";
+  const showTicker = kind !== "DEPOSIT" && kind !== "WITHDRAWAL";
+  const isCashFlow = kind === "DEPOSIT" || kind === "WITHDRAWAL";
 
   const qNum = Number(quantity);
   const pNum = Number(price);
@@ -198,6 +207,10 @@ export function TransactionForm({
     const fd = new FormData(e.currentTarget);
     fd.set("kind", kind);
     if (brokerageId) fd.set("brokerageId", brokerageId);
+    // Cash flows have no ticker — the server still requires a non-empty
+    // ticker field, so we inject a sentinel that downstream queries filter
+    // out of holdings/ACB logic.
+    if (isCashFlow) fd.set("ticker", CASH_TICKER);
 
     startTransition(async () => {
       const result = editing
@@ -243,7 +256,7 @@ export function TransactionForm({
       ) : null}
 
       {/* Kind segmented */}
-      <div className="mb-6 flex rounded-[24px] bg-pill p-[5px]">
+      <div className="mb-6 grid grid-cols-3 gap-1 rounded-[20px] bg-pill p-[5px]">
         {KINDS.map((k) => {
           const active = k === kind;
           return (
@@ -251,7 +264,7 @@ export function TransactionForm({
               key={k}
               type="button"
               onClick={() => setKind(k)}
-              className={`flex-1 rounded-[20px] py-[10px] text-[14px] font-semibold transition-colors ${
+              className={`rounded-[16px] py-[8px] text-[13px] font-semibold transition-colors ${
                 active ? "bg-white text-bg" : "text-muted hover:text-text"
               }`}
             >
@@ -261,20 +274,22 @@ export function TransactionForm({
         })}
       </div>
 
-      <Field label="Ticker">
-        <input
-          name="ticker"
-          type="text"
-          required
-          autoComplete="off"
-          spellCheck={false}
-          maxLength={10}
-          value={ticker}
-          onChange={(e) => setTicker(e.target.value.toUpperCase())}
-          placeholder="AAPL"
-          className={`${inputClass} font-mono uppercase tracking-wide`}
-        />
-      </Field>
+      {showTicker ? (
+        <Field label="Ticker">
+          <input
+            name="ticker"
+            type="text"
+            required
+            autoComplete="off"
+            spellCheck={false}
+            maxLength={10}
+            value={ticker}
+            onChange={(e) => setTicker(e.target.value.toUpperCase())}
+            placeholder="AAPL"
+            className={`${inputClass} font-mono uppercase tracking-wide`}
+          />
+        </Field>
+      ) : null}
 
       {brokerages.length > 1 ? (
         <Field label="Brokerage">
@@ -408,7 +423,20 @@ export function TransactionForm({
       ) : null}
 
       {showAmount ? (
-        <Field label="Amount received ($)">
+        <Field
+          label={
+            kind === "DIVIDEND"
+              ? "Amount received ($)"
+              : kind === "DEPOSIT"
+                ? "Amount deposited ($)"
+                : "Amount withdrawn ($)"
+          }
+          help={
+            isCashFlow
+              ? `Cash ${kind === "DEPOSIT" ? "moved into" : "moved out of"} the ${selectedBrokerage?.name ?? "account"} from an external source.`
+              : undefined
+          }
+        >
           <input
             name="amount"
             type="number"

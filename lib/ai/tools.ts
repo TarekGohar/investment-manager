@@ -20,6 +20,7 @@ import {
 import { computeDrift, getInvestmentPolicy } from "@/lib/policy/ips";
 import { listTheses } from "@/lib/policy/thesis";
 import { getBehavioralPatternsWithPolicy } from "@/lib/behavioral/patterns";
+import { getCashBalances, summarizeCash } from "@/lib/portfolio/cash";
 import { prisma } from "@/lib/prisma";
 import { listTransactions } from "@/lib/portfolio/queries";
 import { getUserPreferences } from "@/lib/preferences";
@@ -230,6 +231,32 @@ export function buildTools(userId: string): ToolDefinition[] {
             lossAmount: w.lossAmount,
             windowEndsAt: w.windowEndsAt.toISOString(),
             daysRemaining: w.daysRemaining,
+          })),
+        };
+      },
+    },
+
+    {
+      name: "get_cash_balances",
+      description:
+        "Cash balance per brokerage account, plus lifetime deposits and withdrawals. Balance = deposits + sell proceeds + dividends (net of FWT) − withdrawals − buy cost (with fees). Cross-currency totals are NOT FX-converted — each currency aggregates separately. A negative balance usually means the user entered a buy or withdrawal before the deposit that funded it. Use this when answering 'how much cash do I have', 'how much did I take out of X', or when sizing a hypothetical buy against available cash.",
+      parameters: { type: "object", properties: {}, additionalProperties: false },
+      execute: async () => {
+        const balances = await getCashBalances(userId);
+        const summary = summarizeCash(balances);
+        return {
+          totalsByCurrency: summary.totalsByCurrency,
+          totalDepositsByCurrency: summary.totalDepositsByCurrency,
+          totalWithdrawalsByCurrency: summary.totalWithdrawalsByCurrency,
+          accounts: summary.byBrokerage.map((b) => ({
+            brokerageName: b.brokerageName,
+            brokerageKind: b.brokerageKind,
+            currency: b.currency,
+            balance: b.balance,
+            totalDeposits: b.totalDeposits,
+            totalWithdrawals: b.totalWithdrawals,
+            totalInternalInflow: b.totalInternalInflow,
+            totalInternalOutflow: b.totalInternalOutflow,
           })),
         };
       },

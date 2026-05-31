@@ -98,6 +98,13 @@ enum TransactionKind {
   SPLIT
   TRANSFER_IN
   TRANSFER_OUT
+  /// Cash deposited into the brokerage from an external source (paycheque,
+  /// bank transfer). Used to compute cash balance per account and (in
+  /// future) to drive contribution-room tracking for registered accounts.
+  DEPOSIT
+  /// Cash withdrawn from the brokerage to an external destination (bank,
+  /// rent payment). Reduces the cash balance.
+  WITHDRAWAL
 }
 
 enum BrokerageKind {

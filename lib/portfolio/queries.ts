@@ -167,7 +167,11 @@ export type UserTicker = {
 export async function getUserTickers(userId: string): Promise<UserTicker[]> {
   const [txTickers, watch] = await Promise.all([
     prisma.transaction.findMany({
-      where: { userId },
+      where: {
+        userId,
+        // Exclude cash flows — $CASH isn't a real ticker.
+        kind: { notIn: ["DEPOSIT", "WITHDRAWAL"] },
+      },
       select: { ticker: true },
       distinct: ["ticker"],
     }),
