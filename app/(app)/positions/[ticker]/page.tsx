@@ -34,7 +34,7 @@ import { FilingsTab } from "@/components/filings-tab";
 import { ThesisCard } from "@/components/thesis-card";
 import { getLatestQuarterlyAnalysis } from "@/lib/ai/filings";
 import { getThesis } from "@/lib/policy/thesis";
-import { issuerSearchUrl } from "@/lib/filings/sedar";
+import { sedarPlusHomeUrl } from "@/lib/filings/sedar";
 import { lookupCik } from "@/lib/filings/edgar";
 import { isNonRegisteredKind } from "@/lib/portfolio/holdings";
 import type { BrokerageKind } from "@/generated/prisma";
@@ -469,7 +469,7 @@ export default async function PositionPage({
         filedAt: f.filedAt,
       }))}
       latestSummary={latestQuarterly}
-      sedarUrl={issuerSearchUrl(ticker)}
+      sedarUrl={sedarPlusHomeUrl()}
       isUsListed={cikInfo != null}
     />
   );

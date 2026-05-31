@@ -20,7 +20,13 @@ import type { FilingType } from "@/generated/prisma";
  *    results page with a real browser via Playwright.
  */
 
-const SEDAR_BASE = "https://www.sedarplus.ca";
+/**
+ * SEDAR+ has no stable public deep-link for issuer search — the search UI
+ * is stateful (form POSTs against a session) and synthetic URLs trip the
+ * abuse-detection system. We just point users at the homepage and let
+ * them paste the ticker into the search box themselves.
+ */
+const SEDAR_HOMEPAGE = "https://www.sedarplus.ca/landingpage/?language=en_CA";
 
 export type SedarFilingListItem = {
   externalId: string;
@@ -38,10 +44,7 @@ export async function listRecentFilings(
   return [];
 }
 
-/** Returns a search URL on SEDAR+ for the given ticker symbol or issuer name. */
-export function issuerSearchUrl(query: string): string {
-  const params = new URLSearchParams({
-    keyword: query,
-  });
-  return `${SEDAR_BASE}/landingpage/?${params.toString()}`;
+/** Public URL to send users to so they can search SEDAR+ manually. */
+export function sedarPlusHomeUrl(): string {
+  return SEDAR_HOMEPAGE;
 }

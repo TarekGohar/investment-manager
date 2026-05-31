@@ -94,8 +94,9 @@ export function FilingsTab({
             target="_blank"
             rel="noopener noreferrer"
             className="text-xs text-muted underline"
+            title="SEDAR+ has no stable deep-link search — opens the homepage; paste the ticker into their search."
           >
-            Search SEDAR+ for {ticker} →
+            Open SEDAR+ →
           </a>
         </div>
         {filings.length === 0 ? (
