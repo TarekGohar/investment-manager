@@ -4,6 +4,7 @@ import { fetchFundamentals, fetchNews, fetchQuote } from "./finnhub";
 import { fetchCandlesYahoo, fetchIntraday1D, fetchIntraday1W } from "./yahoo";
 import { tmxGetQuote, tmxGetNews } from "./tmx";
 import { cseGetQuote } from "./cse";
+import { cisionDeriveSlug, cisionListReleases, type CisionRelease } from "./cision";
 import type { Candle, Fundamentals, NewsItem, Quote } from "./types";
 
 /**
@@ -210,23 +211,52 @@ export async function getNews(ticker: string, limit = 12): Promise<NewsItem[]> {
   const listing = listingFromTicker(sym);
 
   if (!fresh) {
-    // Route by listing: Canadian → TMX (headlines only, no body/URL),
-    // others → Finnhub (full article metadata).
+    // Route by listing: Canadian → TMX (headlines) + Cision (press
+    // releases with full URLs and bodies), others → Finnhub.
     if (listing === "TSX_OR_V" || listing === "CSE") {
-      const items = await tmxGetNews(sym, limit).catch(() => []);
-      if (items.length > 0) {
+      // Cision: pull press releases. The slug is either stored on
+      // TickerListing.cisionSlug or auto-derived from the issuer name.
+      const tl = await prisma.tickerListing.findUnique({
+        where: { ticker: sym },
+        select: { cisionSlug: true, name: true },
+      });
+      const slug = tl?.cisionSlug || (tl?.name ? cisionDeriveSlug(tl.name) : null);
+      let cisionItems: CisionRelease[] = [];
+      if (slug) {
+        cisionItems = await cisionListReleases(slug, { limit }).catch(() => []);
+      }
+      if (cisionItems.length > 0) {
         await prisma.newsItem.createMany({
-          data: items.map((i) => ({
-            id: `tmx:${sym}:${i.datetime}:${i.headline.slice(0, 60)}`,
+          data: cisionItems.map((i) => ({
+            id: `cision:${sym}:${i.url.split("/").pop()}`,
             ticker: sym,
             headline: i.headline,
-            summary: null,
-            url: "",
-            source: i.source ?? "TMX",
-            publishedAt: new Date(i.datetime),
+            summary: i.preview,
+            url: i.url,
+            source: "Cision Newswire",
+            publishedAt: i.publishedAt ?? new Date(),
           })),
           skipDuplicates: true,
         });
+      }
+
+      // TMX as supplement when Cision is empty or scarce.
+      if (cisionItems.length < 5) {
+        const items = await tmxGetNews(sym, limit).catch(() => []);
+        if (items.length > 0) {
+          await prisma.newsItem.createMany({
+            data: items.map((i) => ({
+              id: `tmx:${sym}:${i.datetime}:${i.headline.slice(0, 60)}`,
+              ticker: sym,
+              headline: i.headline,
+              summary: null,
+              url: "",
+              source: i.source ?? "TMX",
+              publishedAt: new Date(i.datetime),
+            })),
+            skipDuplicates: true,
+          });
+        }
       }
     } else {
       try {

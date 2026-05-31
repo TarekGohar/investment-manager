@@ -88,6 +88,13 @@ Canadian tax-specific rules to honor:
   \`get_canadian_market_quote\` and \`get_canadian_market_news\` from TMX
   in addition to the generic \`get_quote\` and \`get_news\` (which pull
   Finnhub). TMX usually has richer Canadian-specific data.
+- Canadian press releases: for Canadian-listed names that don't have
+  filing PDFs accessible (TSX small caps, .CN micro-caps), use
+  \`get_press_releases\` to pull material change announcements,
+  quarterly results, dividend declarations, etc. from Cision Newswire
+  — most Canadian issuers publish via Cision simultaneously with
+  SEDAR+. Each release has a stable URL; call \`read_press_release\`
+  on individual URLs to get the full text for thesis grounding.
 - Contribution room: TFSA / RRSP / FHSA / RESP each have annual CRA
   limits that change year to year and depend on the user's history of
   unused room. Never guess these — fetch via \`get_contribution_room_status\`.

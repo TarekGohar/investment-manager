@@ -23,6 +23,11 @@ import { getBehavioralPatternsWithPolicy } from "@/lib/behavioral/patterns";
 import { getCashBalances, summarizeCash } from "@/lib/portfolio/cash";
 import { getFilingsForTicker, getInsiderActivity } from "@/lib/filings";
 import { tmxGetQuote, tmxGetNews } from "@/lib/marketdata/tmx";
+import {
+  cisionDeriveSlug,
+  cisionListReleases,
+  cisionFetchReleaseBody,
+} from "@/lib/marketdata/cision";
 import { prisma } from "@/lib/prisma";
 import { listTransactions } from "@/lib/portfolio/queries";
 import { getUserPreferences } from "@/lib/preferences";
@@ -451,6 +456,76 @@ export function buildTools(userId: string): ToolDefinition[] {
         if (!ticker) return { error: "Missing ticker." };
         const q = await tmxGetQuote(ticker);
         return q ?? { error: `No TMX data for ${ticker}.` };
+      },
+    },
+
+    {
+      name: "get_press_releases",
+      description:
+        "Recent press releases for a Canadian-listed ticker, sourced from Cision Newswire (newswire.ca) — the dominant Canadian wire that most TSX / TSXV / CSE issuers use to publish material change reports, quarterly results, dividend announcements, and other disclosures. Each release has a URL, headline, preview, and ISO timestamp. Use this for ground-truth Canadian disclosures when SEDAR+ PDFs aren't accessible. Returns empty for tickers we don't have a Cision slug for; the user can override the slug in their TickerListing.",
+      parameters: {
+        type: "object",
+        properties: {
+          ticker: { type: "string" },
+          limit: { type: "integer", minimum: 1, maximum: 25 },
+        },
+        required: ["ticker"],
+        additionalProperties: false,
+      },
+      execute: async (input) => {
+        const ticker = String(getProp(input, "ticker") ?? "").toUpperCase();
+        const limit = clampInt(getProp(input, "limit"), 15, 1, 25);
+        if (!ticker) return { error: "Missing ticker." };
+        const tl = await prisma.tickerListing.findUnique({
+          where: { ticker },
+          select: { cisionSlug: true, name: true },
+        });
+        const slug = tl?.cisionSlug || (tl?.name ? cisionDeriveSlug(tl.name) : null);
+        if (!slug) {
+          return {
+            ticker,
+            error:
+              "No Cision slug for this ticker yet. Save a TickerListing.name or override .cisionSlug to enable.",
+          };
+        }
+        const releases = await cisionListReleases(slug, { limit });
+        return {
+          ticker,
+          slug,
+          count: releases.length,
+          releases: releases.map((r) => ({
+            url: r.url,
+            headline: r.headline,
+            publishedAt: r.publishedAt?.toISOString() ?? null,
+            preview: r.preview,
+          })),
+        };
+      },
+    },
+
+    {
+      name: "read_press_release",
+      description:
+        "Fetch the full text of a specific Cision press release given its URL. Returns title, ISO date, and the cleaned article body (~5–30k chars typically). Use this to ground a thesis re-check or material-event analysis on the actual press release content rather than just the headline.",
+      parameters: {
+        type: "object",
+        properties: { url: { type: "string" } },
+        required: ["url"],
+        additionalProperties: false,
+      },
+      execute: async (input) => {
+        const url = String(getProp(input, "url") ?? "");
+        if (!url || !url.includes("newswire.ca")) {
+          return { error: "Pass a full Cision (newswire.ca) press release URL." };
+        }
+        const result = await cisionFetchReleaseBody(url);
+        if (!result) return { error: "Couldn't fetch that press release." };
+        return {
+          url,
+          title: result.title,
+          publishedAt: result.publishedAt?.toISOString() ?? null,
+          body: result.body,
+        };
       },
     },
 

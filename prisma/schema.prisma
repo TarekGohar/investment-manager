@@ -489,6 +489,10 @@ model TickerListing {
   cseSlug     String?
   /// TMX symbol (usually same as ticker minus suffix).
   tmxSymbol   String?
+  /// Cision Newswire slug for the issuer's press release page
+  /// (newswire.ca/news/<slug>/). Auto-derived from `name` when possible,
+  /// overridable via UI when the derived slug doesn't match.
+  cisionSlug  String?
   /// SEDAR+ issuer number (numeric, e.g. "12345") extracted from a
   /// pasted issuer profile URL. Required for cookie-authed SEDAR+ pulls.
   sedarIssuerNo String?
