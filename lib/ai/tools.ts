@@ -21,6 +21,8 @@ import { computeDrift, getInvestmentPolicy } from "@/lib/policy/ips";
 import { listTheses } from "@/lib/policy/thesis";
 import { getBehavioralPatternsWithPolicy } from "@/lib/behavioral/patterns";
 import { getCashBalances, summarizeCash } from "@/lib/portfolio/cash";
+import { getFilingsForTicker, getInsiderActivity } from "@/lib/filings";
+import { tmxGetQuote, tmxGetNews } from "@/lib/marketdata/tmx";
 import { prisma } from "@/lib/prisma";
 import { listTransactions } from "@/lib/portfolio/queries";
 import { getUserPreferences } from "@/lib/preferences";
@@ -359,6 +361,118 @@ export function buildTools(userId: string): ToolDefinition[] {
           riskFreeRate: summary.riskFreeRate,
           correlation,
         };
+      },
+    },
+
+    {
+      name: "get_all_filings",
+      description:
+        "All available filings for a ticker, fanned across data sources: SEC EDGAR for US-listed names, webapi.thecse.com for CSE-listed names (full PDF URLs for MD&A, annual financials, material change reports, news releases), TMX Money for TSX/TSXV-listed names (metadata only — no PDFs because SEDAR+'s bot manager blocks our access; use get_canadian_market_quote for current data). Returns up to 1 year of history. Each filing has `source` (EDGAR / CSE / TMX), `type`, `title`, `filedAt`, and `url` when available.",
+      parameters: {
+        type: "object",
+        properties: {
+          ticker: { type: "string" },
+          sinceDays: { type: "integer", minimum: 1, maximum: 3650 },
+        },
+        required: ["ticker"],
+        additionalProperties: false,
+      },
+      execute: async (input) => {
+        const ticker = String(getProp(input, "ticker") ?? "").toUpperCase();
+        const sinceDays = clampInt(getProp(input, "sinceDays"), 365, 1, 3650);
+        if (!ticker) return { error: "Missing ticker." };
+        const filings = await getFilingsForTicker(ticker, { sinceDays });
+        return {
+          ticker,
+          filings: filings.map((f) => ({
+            source: f.source,
+            type: f.type,
+            title: f.title,
+            categoryLabel: f.categoryLabel,
+            filedAt: f.filedAt.toISOString(),
+            url: f.url,
+            externalId: f.externalId,
+          })),
+        };
+      },
+    },
+
+    {
+      name: "get_insider_activity",
+      description:
+        "Recent insider transactions (Form 4) for a US-listed ticker. Returns each transaction with insider name, title (Officer / Director / 10% Owner), date, code (P = open-market purchase, S = sale, M = option exercise, G = gift, A = grant), acquired-or-disposed flag, share count, price per share, and shares-owned-after. Filings come from SEC EDGAR. Returns empty for non-US-listed tickers — Canadian SEDI / canadianinsider.com is not yet wired up.",
+      parameters: {
+        type: "object",
+        properties: {
+          ticker: { type: "string" },
+          sinceDays: { type: "integer", minimum: 1, maximum: 730 },
+          limit: { type: "integer", minimum: 1, maximum: 50 },
+        },
+        required: ["ticker"],
+        additionalProperties: false,
+      },
+      execute: async (input) => {
+        const ticker = String(getProp(input, "ticker") ?? "").toUpperCase();
+        const sinceDays = clampInt(getProp(input, "sinceDays"), 180, 1, 730);
+        const limit = clampInt(getProp(input, "limit"), 20, 1, 50);
+        if (!ticker) return { error: "Missing ticker." };
+        const txns = await getInsiderActivity(ticker, { sinceDays, limit });
+        return {
+          ticker,
+          count: txns.length,
+          transactions: txns.map((t) => ({
+            insiderName: t.insiderName,
+            insiderTitle: t.insiderTitle,
+            date: t.transactionDate.toISOString().slice(0, 10),
+            code: t.transactionCode,
+            action: t.acquiredOrDisposed === "A" ? "ACQUIRED" : t.acquiredOrDisposed === "D" ? "DISPOSED" : null,
+            shares: t.shares,
+            pricePerShare: t.pricePerShare,
+            sharesOwnedAfter: t.sharesOwnedAfter,
+            ownership: t.directOwnership === true ? "direct" : t.directOwnership === false ? "indirect" : null,
+            filingUrl: t.filingUrl,
+          })),
+        };
+      },
+    },
+
+    {
+      name: "get_canadian_market_quote",
+      description:
+        "TMX Money quote + corporate metadata for a Canadian-listed ticker (TSX / TSXV / NEO / Aequitas). Returns price, price change, day volume, prevClose, P/E, market cap (in CAD), shares outstanding, 10/30-day average volume, 52-week high/low, sector, industry. Use this for SHOP.TO, RY, ENB, CNR, etc. — when Yahoo data is sparse or you want richer Canadian-specific fields. Returns null if the ticker isn't on TMX.",
+      parameters: {
+        type: "object",
+        properties: { ticker: { type: "string" } },
+        required: ["ticker"],
+        additionalProperties: false,
+      },
+      execute: async (input) => {
+        const ticker = String(getProp(input, "ticker") ?? "").toUpperCase();
+        if (!ticker) return { error: "Missing ticker." };
+        const q = await tmxGetQuote(ticker);
+        return q ?? { error: `No TMX data for ${ticker}.` };
+      },
+    },
+
+    {
+      name: "get_canadian_market_news",
+      description:
+        "News headlines for a Canadian-listed ticker from TMX Money. Returns headline, datetime, and source. Use when Finnhub coverage is thin for Canadian names. Body text is not available — for deeper context, follow the source up via the article URL when one exists.",
+      parameters: {
+        type: "object",
+        properties: {
+          ticker: { type: "string" },
+          limit: { type: "integer", minimum: 1, maximum: 30 },
+        },
+        required: ["ticker"],
+        additionalProperties: false,
+      },
+      execute: async (input) => {
+        const ticker = String(getProp(input, "ticker") ?? "").toUpperCase();
+        const limit = clampInt(getProp(input, "limit"), 15, 1, 30);
+        if (!ticker) return { error: "Missing ticker." };
+        const news = await tmxGetNews(ticker, limit);
+        return { ticker, items: news };
       },
     },
 

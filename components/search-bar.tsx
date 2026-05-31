@@ -73,7 +73,7 @@ export function SearchBar({ tickers }: { tickers: UserTicker[] }) {
 
   return (
     <div className="relative" ref={containerRef}>
-      <label className="flex h-11 w-[180px] items-center gap-[10px] rounded-[24px] bg-panel px-[18px] text-muted focus-within:ring-1 focus-within:ring-brand md:w-[260px] lg:w-[380px]">
+      <label className="flex h-11 w-[180px] items-center gap-[10px] rounded-[24px] bg-panel px-[18px] text-muted md:w-[260px] lg:w-[380px]">
         <SearchIcon className="h-5 w-5 shrink-0" />
         <input
           ref={inputRef}
@@ -85,7 +85,8 @@ export function SearchBar({ tickers }: { tickers: UserTicker[] }) {
           onKeyDown={handleKeyDown}
           autoComplete="off"
           spellCheck={false}
-          className="w-full bg-transparent text-[15px] text-text placeholder:text-muted focus:outline-none"
+          className="w-full bg-transparent text-[15px] rounded-none! text-text placeholder:text-muted outline-none ring-0 focus:outline-none focus:ring-0 active:outline-none active:ring-0"
+          style={{ outline: "none", boxShadow: "none" }}
         />
       </label>
 
@@ -101,11 +102,12 @@ export function SearchBar({ tickers }: { tickers: UserTicker[] }) {
                 onMouseEnter={() => setHighlight(i)}
                 className={`flex w-full items-center gap-3 rounded-[10px] px-3 py-2.5 text-left transition-colors ${
                   active ? "bg-panel-2" : "hover:bg-panel-2"
-                }`}
-              >
+                }`}>
                 <TickerBadge ticker={t.ticker} size={28} />
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-[14px] font-semibold">{t.ticker}</div>
+                  <div className="truncate text-[14px] font-semibold">
+                    {t.ticker}
+                  </div>
                 </div>
                 <div className="text-xs text-muted">
                   {t.source === "holding" ? "Position" : "Watchlist"}
@@ -120,13 +122,13 @@ export function SearchBar({ tickers }: { tickers: UserTicker[] }) {
               onMouseEnter={() => setHighlight(matches.length)}
               className={`flex w-full items-center gap-3 rounded-[10px] px-3 py-2.5 text-left transition-colors ${
                 highlight === matches.length ? "bg-panel-2" : "hover:bg-panel-2"
-              }`}
-            >
+              }`}>
               <div className="flex h-7 w-7 items-center justify-center rounded-full bg-pill text-muted">
                 <SearchIcon className="h-3.5 w-3.5" />
               </div>
               <div className="flex-1 text-[14px] font-medium text-soft">
-                Look up <span className="font-semibold text-text">{trimmed}</span>
+                Look up{" "}
+                <span className="font-semibold text-text">{trimmed}</span>
               </div>
               <div className="text-xs text-muted-2">↵</div>
             </button>

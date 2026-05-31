@@ -427,6 +427,33 @@ enum FilingType {
 enum FilingSource {
   EDGAR
   SEDAR_PLUS
+  CSE
+  TMX
+}
+
+/// Cached ticker → external-source ID mappings. Populated either by
+/// auto-resolvers (EDGAR CIK lookup, TMX symbol probe) or manually by the
+/// user pasting a CSE / TMX page URL.
+model TickerListing {
+  id          String   @id @default(cuid())
+  /// Canonical ticker as used in this app — e.g. "AAPL", "SHOP.TO",
+  /// "MVMD.CN". Suffix indicates listing exchange.
+  ticker      String   @unique
+  /// Listing exchange code. NYSE / NASDAQ / TSX / TSXV / CSE / NEO / OTHER.
+  exchange    String
+  name        String?
+  /// SEC EDGAR Central Index Key (10-digit, zero-padded).
+  cik         String?
+  /// CSE issuer ID (e.g. "000023721") for webapi.thecse.com.
+  cseIssuerId String?
+  /// CSE URL slug (sector/company-slug) for thecse.com lookups.
+  cseSlug     String?
+  /// TMX symbol (usually same as ticker minus suffix).
+  tmxSymbol   String?
+  resolvedAt  DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("ticker_listing")
 }
 
 enum ThesisStatus {

@@ -34,8 +34,8 @@ import { FilingsTab } from "@/components/filings-tab";
 import { ThesisCard } from "@/components/thesis-card";
 import { getLatestQuarterlyAnalysis } from "@/lib/ai/filings";
 import { getThesis } from "@/lib/policy/thesis";
-import { sedarPlusHomeUrl } from "@/lib/filings/sedar";
 import { lookupCik } from "@/lib/filings/edgar";
+import { getFilingsForTicker, getInsiderActivity } from "@/lib/filings";
 import { isNonRegisteredKind } from "@/lib/portfolio/holdings";
 import type { BrokerageKind } from "@/generated/prisma";
 
@@ -93,22 +93,12 @@ export default async function PositionPage({
   ]);
 
   const thesis = await getThesis(session.user.id, ticker);
-  const [filings, latestQuarterly, cikInfo] = await Promise.all([
-    prisma.filing.findMany({
-      where: { ticker },
-      orderBy: { filedAt: "desc" },
-      take: 30,
-      select: {
-        id: true,
-        type: true,
-        source: true,
-        url: true,
-        title: true,
-        filedAt: true,
-      },
-    }),
+  const [unifiedFilings, insiderTxns, latestQuarterly, cikInfo, tickerListing] = await Promise.all([
+    getFilingsForTicker(ticker, { sinceDays: 365 }).catch(() => []),
+    getInsiderActivity(ticker, { sinceDays: 180, limit: 20 }).catch(() => []),
     getLatestQuarterlyAnalysis(session.user.id, ticker),
     lookupCik(ticker).catch(() => null),
+    prisma.tickerListing.findUnique({ where: { ticker } }).catch(() => null),
   ]);
 
   if (!holding && transactions.length === 0 && !quote) notFound();
@@ -460,17 +450,12 @@ export default async function PositionPage({
   const filingsSection = (
     <FilingsTab
       ticker={ticker}
-      filings={filings.map((f) => ({
-        id: f.id,
-        type: f.type,
-        source: f.source,
-        url: f.url,
-        title: f.title,
-        filedAt: f.filedAt,
-      }))}
+      filings={unifiedFilings}
+      insiderTransactions={insiderTxns}
       latestSummary={latestQuarterly}
-      sedarUrl={sedarPlusHomeUrl()}
       isUsListed={cikInfo != null}
+      hasCseListing={tickerListing?.cseIssuerId != null}
+      isCseTicker={/\.CN$/i.test(ticker)}
     />
   );
 

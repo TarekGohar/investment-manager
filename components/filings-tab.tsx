@@ -1,14 +1,7 @@
 import Link from "next/link";
 import { Markdown } from "@/components/markdown";
-
-export type FilingListItem = {
-  id: string;
-  type: string;
-  source: string;
-  url: string;
-  title: string | null;
-  filedAt: Date;
-};
+import { CseListingLinker } from "@/components/cse-listing-linker";
+import type { UnifiedFiling, UnifiedInsiderTransaction } from "@/lib/filings";
 
 export type LatestQuarterlySummary = {
   id: string;
@@ -30,18 +23,28 @@ const FILING_TYPE_LABEL: Record<string, string> = {
   OTHER: "Filing",
 };
 
+const SOURCE_TONE: Record<string, string> = {
+  EDGAR: "bg-brand/10 text-brand-2",
+  CSE: "bg-success/15 text-success",
+  TMX: "bg-warning/15 text-warning",
+};
+
 export function FilingsTab({
   ticker,
   filings,
+  insiderTransactions,
   latestSummary,
-  sedarUrl,
   isUsListed,
+  hasCseListing,
+  isCseTicker,
 }: {
   ticker: string;
-  filings: FilingListItem[];
+  filings: UnifiedFiling[];
+  insiderTransactions: UnifiedInsiderTransaction[];
   latestSummary: LatestQuarterlySummary | null;
-  sedarUrl: string;
   isUsListed: boolean;
+  hasCseListing: boolean;
+  isCseTicker: boolean;
 }) {
   return (
     <div className="space-y-[26px]">
@@ -80,49 +83,63 @@ export function FilingsTab({
             yet.
             {isUsListed
               ? " The daily filings cron will generate one once a 10-Q or 10-K is detected for your holdings."
-              : " AI summarization is currently US-listed (EDGAR) only — see the link below for SEDAR+ filings."}
+              : hasCseListing
+                ? " AI summarization for CSE filings is queued — the cron currently runs on EDGAR only."
+                : " Link this ticker to its CSE / SEDAR listing below and the AI will start summarizing filings."}
           </div>
         )}
       </section>
+
+      {/* CSE listing linker — shown for .CN tickers without a saved listing */}
+      {isCseTicker && !hasCseListing ? (
+        <CseListingLinker ticker={ticker} />
+      ) : null}
 
       {/* Filing history list */}
       <section className="rounded-card border border-border bg-panel">
         <div className="flex flex-wrap items-baseline justify-between gap-2 px-6 py-5">
           <h3 className="text-[16px] font-semibold">Filing history</h3>
-          {!isUsListed ? (
-            <span className="text-xs text-muted">
-              Canadian-listed? Search{" "}
-              <span className="font-mono text-text">{sedarUrl}</span> manually
-              (their bot filter blocks cross-site links).
-            </span>
-          ) : null}
+          <span className="text-xs text-muted">
+            {filings.length} filing{filings.length === 1 ? "" : "s"}
+            {filings.length > 0
+              ? ` · ${Array.from(new Set(filings.map((f) => f.source))).join(", ")}`
+              : ""}
+          </span>
         </div>
         {filings.length === 0 ? (
           <div className="border-t border-border px-6 py-8 text-center text-sm text-muted">
             No filings indexed yet for this ticker.
+            {!isUsListed && !hasCseListing
+              ? " For Canadian-listed names, link a CSE listing URL above to populate filings."
+              : ""}
           </div>
         ) : (
           <div className="overflow-x-auto">
             <div className="min-w-[600px]">
-              <div className="grid grid-cols-[1fr_2.5fr_1fr_0.6fr] gap-3 border-t border-border px-6 py-3 text-xs font-semibold uppercase tracking-wide text-muted">
+              <div className="grid grid-cols-[1.2fr_2.5fr_1fr_0.6fr] gap-3 border-t border-border px-6 py-3 text-xs font-semibold uppercase tracking-wide text-muted">
                 <div>Form</div>
                 <div>Title</div>
                 <div>Filed</div>
                 <div className="text-right">Open</div>
               </div>
-              {filings.map((f) => (
+              {filings.map((f, i) => (
                 <div
-                  key={f.id}
-                  className="grid grid-cols-[1fr_2.5fr_1fr_0.6fr] items-center gap-3 border-t border-border px-6 py-3"
+                  key={f.externalId ?? `${f.source}-${i}`}
+                  className="grid grid-cols-[1.2fr_2.5fr_1fr_0.6fr] items-center gap-3 border-t border-border px-6 py-3"
                 >
                   <div className="text-[14px] font-semibold">
                     {FILING_TYPE_LABEL[f.type] ?? f.type}
-                    <span className="ml-2 text-[10px] uppercase tracking-wide text-muted-2">
-                      {f.source === "EDGAR" ? "EDGAR" : "SEDAR+"}
+                    <span
+                      className={`ml-2 rounded-full px-1.5 py-0.5 text-[10px] uppercase tracking-wide ${SOURCE_TONE[f.source] ?? "bg-muted/15 text-muted"}`}
+                    >
+                      {f.source}
                     </span>
                   </div>
-                  <div className="truncate text-[13px] text-soft">
-                    {f.title ?? "—"}
+                  <div className="truncate text-[13px] text-soft" title={f.title}>
+                    {f.title}
+                    {f.categoryLabel && f.categoryLabel !== f.title ? (
+                      <span className="ml-1 text-muted-2"> · {f.categoryLabel}</span>
+                    ) : null}
                   </div>
                   <div className="text-[13px] text-muted">
                     {f.filedAt.toLocaleDateString("en-US", {
@@ -132,14 +149,18 @@ export function FilingsTab({
                     })}
                   </div>
                   <div className="text-right">
-                    <Link
-                      href={f.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-xs font-semibold text-brand-2 hover:underline"
-                    >
-                      View
-                    </Link>
+                    {f.url ? (
+                      <Link
+                        href={f.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs font-semibold text-brand-2 hover:underline"
+                      >
+                        View
+                      </Link>
+                    ) : (
+                      <span className="text-xs text-muted-2">—</span>
+                    )}
                   </div>
                 </div>
               ))}
@@ -147,6 +168,81 @@ export function FilingsTab({
           </div>
         )}
       </section>
+
+      {/* Insider activity — US only via EDGAR Form 4 */}
+      {insiderTransactions.length > 0 ? (
+        <section className="rounded-card border border-border bg-panel">
+          <div className="flex flex-wrap items-baseline justify-between gap-2 px-6 py-5">
+            <h3 className="text-[16px] font-semibold">Insider activity</h3>
+            <span className="text-xs text-muted">
+              {insiderTransactions.length} transaction{insiderTransactions.length === 1 ? "" : "s"} ·
+              from EDGAR Form 4
+            </span>
+          </div>
+          <div className="overflow-x-auto">
+            <div className="min-w-[800px]">
+              <div className="grid grid-cols-[1.4fr_0.9fr_0.6fr_0.8fr_0.9fr_0.9fr] gap-3 border-t border-border px-6 py-3 text-xs font-semibold uppercase tracking-wide text-muted">
+                <div>Insider</div>
+                <div>Date</div>
+                <div>Code</div>
+                <div className="text-right">A/D</div>
+                <div className="text-right">Shares</div>
+                <div className="text-right">Price</div>
+              </div>
+              {insiderTransactions.slice(0, 25).map((t, i) => (
+                <div
+                  key={`${t.accessionNumber}-${i}`}
+                  className="grid grid-cols-[1.4fr_0.9fr_0.6fr_0.8fr_0.9fr_0.9fr] items-center gap-3 border-t border-border px-6 py-2.5"
+                >
+                  <div className="min-w-0">
+                    <div className="truncate text-[13px] font-semibold">{t.insiderName}</div>
+                    {t.insiderTitle ? (
+                      <div className="truncate text-[11px] text-muted">{t.insiderTitle}</div>
+                    ) : null}
+                  </div>
+                  <div className="text-[13px] text-muted">
+                    {t.transactionDate.toLocaleDateString("en-US", {
+                      month: "short",
+                      day: "numeric",
+                      year: "numeric",
+                    })}
+                  </div>
+                  <div className="text-[12px] font-mono text-muted">
+                    {t.transactionCode ?? "—"}
+                  </div>
+                  <div
+                    className={`text-right text-[13px] font-semibold ${
+                      t.acquiredOrDisposed === "A"
+                        ? "text-success"
+                        : t.acquiredOrDisposed === "D"
+                          ? "text-danger"
+                          : "text-muted"
+                    }`}
+                  >
+                    {t.acquiredOrDisposed === "A"
+                      ? "Buy"
+                      : t.acquiredOrDisposed === "D"
+                        ? "Sell"
+                        : "—"}
+                  </div>
+                  <div className="text-right text-[13px] tabular-nums">
+                    {t.shares != null ? t.shares.toLocaleString() : "—"}
+                  </div>
+                  <div className="text-right text-[13px] tabular-nums">
+                    {t.pricePerShare != null
+                      ? `$${t.pricePerShare.toFixed(2)}`
+                      : "—"}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+          <p className="border-t border-border px-6 py-3 text-xs text-muted-2">
+            Codes: P = open-market purchase, S = open-market sale, M = option
+            exercise, G = gift, A = grant. A/D = acquired or disposed.
+          </p>
+        </section>
+      ) : null}
     </div>
   );
 }

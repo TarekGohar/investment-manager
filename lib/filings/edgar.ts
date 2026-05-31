@@ -179,6 +179,164 @@ export async function fetchFilingText(
   return htmlToText(html).slice(0, maxChars);
 }
 
+// ─── Form 4 (insider transactions) ─────────────────────────────────────
+
+export type Form4Transaction = {
+  insiderName: string;
+  insiderTitle: string | null;
+  /** "A" (acquired / buy) or "D" (disposed / sell), or null if not in standard codes. */
+  acquiredOrDisposed: "A" | "D" | null;
+  /** P (purchase), S (sale), M (option exercise), G (gift), etc. */
+  transactionCode: string | null;
+  transactionDate: Date;
+  shares: number | null;
+  pricePerShare: number | null;
+  sharesOwnedAfter: number | null;
+  /** True for "direct" beneficial ownership, false for indirect. */
+  directOwnership: boolean | null;
+  filingUrl: string;
+  accessionNumber: string;
+};
+
+export type Form4Filing = {
+  accessionNumber: string;
+  filedAt: Date;
+  url: string;
+  /** Primary doc HTML/XML URL. Used to fetch the structured XML. */
+  primaryDocument: string;
+};
+
+/** List Form 4 filings for a ticker. */
+export async function listForm4Filings(
+  ticker: string,
+  opts: { since?: Date; limit?: number } = {},
+): Promise<Form4Filing[]> {
+  const meta = await lookupCik(ticker);
+  if (!meta) return [];
+  const url = `${EDGAR_BASE}/submissions/CIK${meta.cik}.json`;
+  const res = await edgarFetch(url);
+  const json = (await res.json()) as SubmissionsResponse;
+  const recent = json.filings?.recent;
+  if (!recent) return [];
+  const since = opts.since?.getTime() ?? 0;
+  const limit = opts.limit ?? 50;
+  const items: Form4Filing[] = [];
+  for (let i = 0; i < recent.accessionNumber.length && items.length < limit; i++) {
+    if (recent.form[i] !== "4" && recent.form[i] !== "4/A") continue;
+    const filedAt = new Date(recent.filingDate[i] + "T00:00:00Z");
+    if (filedAt.getTime() < since) continue;
+    const accessionNumber = recent.accessionNumber[i];
+    const accessionNoDash = accessionNumber.replace(/-/g, "");
+    const primaryDocument = recent.primaryDocument[i];
+    const cikNum = Number(meta.cik);
+    items.push({
+      accessionNumber,
+      filedAt,
+      primaryDocument,
+      url: `${EDGAR_WWW}/Archives/edgar/data/${cikNum}/${accessionNoDash}/${primaryDocument}`,
+    });
+  }
+  return items;
+}
+
+/**
+ * Fetch and parse a Form 4 filing. The primary document is usually XML
+ * (form4.xml) or an HTML wrapper. We grab the underlying ownership.xml
+ * and extract reporter info + non-derivative transaction rows.
+ */
+export async function parseForm4(filing: Form4Filing): Promise<Form4Transaction[]> {
+  // Find the XML companion. EDGAR archive folders typically contain
+  // form4.xml or wf-form4_*.xml. The accession archive index lists them.
+  const accessionNoDash = filing.accessionNumber.replace(/-/g, "");
+  const cikFromUrl = filing.url.match(/data\/(\d+)\//)?.[1];
+  if (!cikFromUrl) return [];
+  const indexUrl = `${EDGAR_WWW}/Archives/edgar/data/${cikFromUrl}/${accessionNoDash}/index.json`;
+  let xmlName: string | null = null;
+  try {
+    const idxRes = await fetch(indexUrl, {
+      headers: { "User-Agent": userAgent() },
+      cache: "no-store",
+    });
+    if (idxRes.ok) {
+      const idx = (await idxRes.json()) as { directory?: { item?: Array<{ name: string }> } };
+      for (const item of idx.directory?.item ?? []) {
+        if (/\.xml$/i.test(item.name) && /form4|ownership|wf-form4/i.test(item.name)) {
+          xmlName = item.name;
+          break;
+        }
+      }
+      // Fall back: any .xml in the dir
+      if (!xmlName) {
+        for (const item of idx.directory?.item ?? []) {
+          if (/\.xml$/i.test(item.name) && !/-index\.xml$/i.test(item.name)) {
+            xmlName = item.name;
+            break;
+          }
+        }
+      }
+    }
+  } catch {}
+  if (!xmlName) return [];
+
+  const xmlUrl = `${EDGAR_WWW}/Archives/edgar/data/${cikFromUrl}/${accessionNoDash}/${xmlName}`;
+  const xmlRes = await fetch(xmlUrl, {
+    headers: { "User-Agent": userAgent() },
+    cache: "no-store",
+  });
+  if (!xmlRes.ok) return [];
+  const xml = await xmlRes.text();
+
+  // Insider name + title
+  const insiderName =
+    extract(xml, /<reportingOwnerId>[\s\S]*?<rptOwnerName>(.*?)<\/rptOwnerName>/i) ?? "Unknown";
+  const titles: string[] = [];
+  for (const m of xml.matchAll(/<officerTitle>([^<]+)<\/officerTitle>/gi)) titles.push(m[1].trim());
+  const isDirector = /<isDirector>\s*(?:1|true)\s*<\/isDirector>/i.test(xml);
+  const isOfficer = /<isOfficer>\s*(?:1|true)\s*<\/isOfficer>/i.test(xml);
+  const isTenPercentOwner = /<isTenPercentOwner>\s*(?:1|true)\s*<\/isTenPercentOwner>/i.test(xml);
+  const insiderTitle =
+    titles.join(", ") ||
+    [isDirector && "Director", isOfficer && "Officer", isTenPercentOwner && "10% Owner"]
+      .filter(Boolean)
+      .join(", ") ||
+    null;
+
+  const txns: Form4Transaction[] = [];
+  // Walk every <nonDerivativeTransaction>
+  for (const block of xml.matchAll(/<nonDerivativeTransaction>([\s\S]*?)<\/nonDerivativeTransaction>/gi)) {
+    const inner = block[1];
+    const txDate = extract(inner, /<transactionDate>[\s\S]*?<value>(.*?)<\/value>/i);
+    const code = extract(inner, /<transactionCode>(.*?)<\/transactionCode>/i);
+    const ad = extract(inner, /<transactionAcquiredDisposedCode>[\s\S]*?<value>(.*?)<\/value>/i);
+    const shares = extract(inner, /<transactionShares>[\s\S]*?<value>(.*?)<\/value>/i);
+    const price = extract(inner, /<transactionPricePerShare>[\s\S]*?<value>(.*?)<\/value>/i);
+    const sharesAfter = extract(inner, /<sharesOwnedFollowingTransaction>[\s\S]*?<value>(.*?)<\/value>/i);
+    const ownership = extract(inner, /<directOrIndirectOwnership>[\s\S]*?<value>(.*?)<\/value>/i);
+    if (!txDate) continue;
+    txns.push({
+      insiderName: insiderName.trim(),
+      insiderTitle,
+      acquiredOrDisposed: ad === "A" ? "A" : ad === "D" ? "D" : null,
+      transactionCode: code?.trim() ?? null,
+      transactionDate: new Date(txDate + "T00:00:00Z"),
+      shares: shares ? Number(shares) : null,
+      pricePerShare: price ? Number(price) : null,
+      sharesOwnedAfter: sharesAfter ? Number(sharesAfter) : null,
+      directOwnership: ownership === "D" ? true : ownership === "I" ? false : null,
+      filingUrl: filing.url,
+      accessionNumber: filing.accessionNumber,
+    });
+  }
+  return txns;
+}
+
+function extract(xml: string, re: RegExp): string | null {
+  const m = xml.match(re);
+  return m ? m[1] : null;
+}
+
+// ─── HTML → text helpers ───────────────────────────────────────────────
+
 function htmlToText(html: string): string {
   const stripped = html
     .replace(/<script[\s\S]*?<\/script>/gi, " ")
