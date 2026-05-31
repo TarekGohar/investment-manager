@@ -33,7 +33,13 @@ export function deriveHoldings(transactions: Tx[]): Holding[] {
   const violations = detectSuperficialLosses(transactions);
   const lossAtSale = new Map<string, number>(); // saleTxId → absorbed-at-remaining amount
   const lossAtBuy = new Map<string, number>(); // buyTxId → absorbed-at-buy amount
+  // Every SELL whose loss is disallowed (regardless of absorption path) so
+  // the realized-gain math knows to skip it. Without this, look-forward
+  // absorption double-counts the loss (once realized on the SELL, once
+  // added to the BUY's ACB).
+  const superficialSaleIds = new Set<string>();
   for (const v of violations) {
+    superficialSaleIds.add(v.saleTransactionId);
     if (v.absorbedBy.kind === "remaining") {
       lossAtSale.set(v.saleTransactionId, (lossAtSale.get(v.saleTransactionId) ?? 0) + v.lossAmount);
     } else {
@@ -91,19 +97,26 @@ export function deriveHoldings(transactions: Tx[]): Holding[] {
 
         case "SELL": {
           const proceeds = tx.quantity * tx.price - tx.fees;
-          const absorbedAtSale = lossAtSale.get(tx.id) ?? 0;
-          const isSuperficial = absorbedAtSale > 0;
+          const isSuperficial = superficialSaleIds.has(tx.id);
+          const absorbedByRemaining = (lossAtSale.get(tx.id) ?? 0) > 0;
           if (isNonReg && nonRegQty > 1e-9) {
             const acb = nonRegCostBasis / nonRegQty;
             const qtySold = Math.min(tx.quantity, nonRegQty);
             const costRemoved = qtySold * acb;
 
-            if (isSuperficial) {
-              // Disallowed loss: cost basis reduces by *proceeds* (not the
-              // higher costRemoved). The difference stays in the pool,
-              // raising the ACB on remaining shares. Realized gain is NOT
-              // recorded for this sale.
+            if (isSuperficial && absorbedByRemaining) {
+              // Disallowed loss absorbed by remaining shares: cost basis
+              // reduces by *proceeds* (not the higher costRemoved). The
+              // difference stays in the pool, raising the ACB on the
+              // unsold shares. Realized gain is NOT recorded.
               nonRegCostBasis -= proceeds;
+              nonRegQty -= qtySold;
+            } else if (isSuperficial) {
+              // Disallowed loss absorbed by a later BUY: cost is removed
+              // normally; the loss amount is added back to that future
+              // BUY's cost basis via lossAtBuy. Realized gain is NOT
+              // recorded — that would double-count the loss.
+              nonRegCostBasis -= costRemoved;
               nonRegQty -= qtySold;
             } else {
               nonRegCostBasis -= costRemoved;

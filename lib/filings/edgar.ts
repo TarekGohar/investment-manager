@@ -12,9 +12,13 @@ const EDGAR_BASE = "https://data.sec.gov";
 const EDGAR_WWW = "https://www.sec.gov";
 
 function userAgent(): string {
+  // SEC requires a User-Agent identifying the requester. They actively
+  // 403 strings that look obviously fake (e.g. @example.invalid), so the
+  // fallback uses example.com (IANA-reserved, well-formed). Production
+  // should override with a real contact via the EDGAR_USER_AGENT env var.
   return (
     process.env.EDGAR_USER_AGENT ||
-    "InvestmentManager (contact-via-github+claude-code@example.invalid)"
+    "InvestmentManager admin@example.com"
   );
 }
 
@@ -176,7 +180,7 @@ export async function fetchFilingText(
 }
 
 function htmlToText(html: string): string {
-  return html
+  const stripped = html
     .replace(/<script[\s\S]*?<\/script>/gi, " ")
     .replace(/<style[\s\S]*?<\/style>/gi, " ")
     .replace(/<!--[\s\S]*?-->/g, " ")
@@ -192,4 +196,38 @@ function htmlToText(html: string): string {
     .replace(/[ \t]+/g, " ")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
+
+  return skipXbrlHeader(stripped);
+}
+
+/**
+ * Inline-XBRL 10-Q / 10-K HTML embeds a long block of context refs, taxonomy
+ * URLs, and concept tags at the top of the document before the actual
+ * rendered narrative. We skip to the first marker that reliably indicates
+ * "real prose starts here" — falling back to the full text if none of the
+ * markers are found (don't want to nuke short filings).
+ */
+function skipXbrlHeader(text: string): string {
+  const markers = [
+    "UNITED STATES SECURITIES AND EXCHANGE COMMISSION",
+    "United States Securities and Exchange Commission",
+    "FORM 10-Q",
+    "FORM 10-K",
+    "Form 10-Q",
+    "Form 10-K",
+    "QUARTERLY REPORT",
+    "ANNUAL REPORT",
+    "PART I",
+  ];
+  let bestIndex = -1;
+  for (const m of markers) {
+    const i = text.indexOf(m);
+    if (i >= 0 && (bestIndex === -1 || i < bestIndex)) {
+      bestIndex = i;
+    }
+  }
+  // Only skip if the marker is more than ~500 chars in (otherwise we'd be
+  // skipping past a short, already-clean preamble).
+  if (bestIndex > 500) return text.slice(bestIndex);
+  return text;
 }
