@@ -8,6 +8,7 @@ import {
 } from "@/app/actions/policy";
 import { useToast } from "@/components/toast-provider";
 import { Markdown } from "@/components/markdown";
+import { formatCurrency } from "@/lib/format";
 import type { ThesisRecord } from "@/lib/policy/thesis";
 
 const STATUS_OPTIONS: ThesisRecord["status"][] = [
@@ -237,7 +238,7 @@ export function ThesisCard({
 
       <div className="mt-3 flex flex-wrap items-center gap-3 text-[12px] text-muted-2">
         {thesis.priceTargetCad != null ? (
-          <span>Target ${thesis.priceTargetCad.toFixed(2)}</span>
+          <span>Target {formatCurrency(thesis.priceTargetCad)}</span>
         ) : null}
         {thesis.horizonMonths != null ? (
           <span>Horizon {thesis.horizonMonths}mo</span>

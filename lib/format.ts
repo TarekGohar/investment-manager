@@ -1,8 +1,21 @@
+/**
+ * Adaptive currency formatter:
+ *   |v| >= 1     → 2 decimals      ($1,234.56, $5.00)
+ *   |v| >= 0.01  → up to 4         ($0.075, $0.0125)
+ *   |v| < 0.01   → up to 6         ($0.000750)
+ *
+ * Penny stocks and many CSE listings trade at fractional cents — losing
+ * those digits hides real price movement. `minimumFractionDigits: 2`
+ * keeps round-dollar amounts looking clean.
+ */
 export function formatCurrency(v: number, opts: Intl.NumberFormatOptions = {}) {
+  const abs = Math.abs(v);
+  const adaptiveMax = abs === 0 ? 2 : abs >= 1 ? 2 : abs >= 0.01 ? 4 : 6;
   return v.toLocaleString("en-US", {
     style: "currency",
     currency: "USD",
-    maximumFractionDigits: 2,
+    minimumFractionDigits: 2,
+    maximumFractionDigits: adaptiveMax,
     ...opts,
   });
 }

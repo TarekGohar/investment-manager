@@ -132,12 +132,12 @@ export async function reviewThesis(
   sections.push(`Ticker: ${sym}`);
   if (holding) {
     sections.push(
-      `Position: ${holding.quantity} sh, ACB ${holding.acb.toFixed(2)}, cost basis ${holding.costBasis.toFixed(2)}`,
+      `Position: ${holding.quantity} sh, ACB ${fmtPrice(holding.acb)}, cost basis ${fmtPrice(holding.costBasis)}`,
     );
   }
   if (quote) {
     sections.push(
-      `Current quote: ${quote.price.toFixed(2)} (${quote.changePct.toFixed(2)}% today, prev close ${quote.prevClose.toFixed(2)})`,
+      `Current quote: ${fmtPrice(quote.price)} (${quote.changePct.toFixed(2)}% today, prev close ${fmtPrice(quote.prevClose)})`,
     );
   }
   sections.push("");
@@ -149,7 +149,7 @@ export async function reviewThesis(
     sections.push(thesis.invalidationCriteria);
   }
   if (thesis.priceTargetCad != null) {
-    sections.push(`Price target: ${thesis.priceTargetCad.toFixed(2)}`);
+    sections.push(`Price target: ${fmtPrice(thesis.priceTargetCad)}`);
   }
   if (thesis.horizonMonths != null) {
     sections.push(`Horizon: ${thesis.horizonMonths} months`);
@@ -197,6 +197,16 @@ export async function reviewThesis(
   });
 
   return body.trim();
+}
+
+/**
+ * Adaptive price formatting for the AI prompt — keeps fractional cents
+ * visible on penny / CSE listings so the model reasons from real numbers.
+ */
+function fmtPrice(v: number): string {
+  const abs = Math.abs(v);
+  const digits = abs === 0 ? 2 : abs >= 1 ? 2 : abs >= 0.01 ? 4 : 6;
+  return v.toFixed(digits);
 }
 
 function toRecord(row: {

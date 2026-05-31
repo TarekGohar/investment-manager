@@ -19,8 +19,17 @@ const W = 1000;
 const PAD_TOP = 30;
 const PAD_BOT = 40;
 
-const defaultFormatter = (v: number) =>
-  v.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 });
+// Adaptive: penny stocks show 4 decimals so $0.075 doesn't render as $0.08.
+const defaultFormatter = (v: number) => {
+  const abs = Math.abs(v);
+  const max = abs === 0 ? 2 : abs >= 1 ? 2 : abs >= 0.01 ? 4 : 6;
+  return v.toLocaleString("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: max,
+  });
+};
 
 export function PriceChart({
   bars,

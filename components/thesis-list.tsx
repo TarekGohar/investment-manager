@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { formatCurrency } from "@/lib/format";
 import type { ThesisRecord } from "@/lib/policy/thesis";
 
 const STATUS_LABEL: Record<ThesisRecord["status"], string> = {
@@ -57,7 +58,7 @@ export function ThesisList({ theses }: { theses: ThesisRecord[] }) {
               ) : null}
               <div className="mt-2 flex flex-wrap items-center gap-3 text-[11px] text-muted-2">
                 {t.priceTargetCad != null ? (
-                  <span>Target {t.priceTargetCad.toFixed(2)}</span>
+                  <span>Target {formatCurrency(t.priceTargetCad)}</span>
                 ) : null}
                 {t.horizonMonths != null ? (
                   <span>Horizon {t.horizonMonths}mo</span>

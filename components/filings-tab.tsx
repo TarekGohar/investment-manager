@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Markdown } from "@/components/markdown";
 import { CseListingLinker } from "@/components/cse-listing-linker";
+import { formatCurrency } from "@/lib/format";
 import type { UnifiedFiling, UnifiedInsiderTransaction } from "@/lib/filings";
 
 export type LatestQuarterlySummary = {
@@ -230,7 +231,7 @@ export function FilingsTab({
                   </div>
                   <div className="text-right text-[13px] tabular-nums">
                     {t.pricePerShare != null
-                      ? `$${t.pricePerShare.toFixed(2)}`
+                      ? formatCurrency(t.pricePerShare)
                       : "—"}
                   </div>
                 </div>
