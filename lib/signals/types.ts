@@ -3,7 +3,7 @@ import type { AlertRule, AlertScope } from "@/generated/prisma";
 export type AlertParams = {
   // PRICE_MOVE: |day change %| ≥ thresholdPct → fire
   PRICE_MOVE: { thresholdPct: number };
-  // DRAWDOWN: (price - avgCost) / avgCost * 100 ≤ -thresholdPct → fire
+  // DRAWDOWN: (price - ACB) / ACB * 100 ≤ -thresholdPct → fire
   DRAWDOWN: { thresholdPct: number };
   // CONCENTRATION: any holding's weight ≥ thresholdPct → fire (per ticker)
   CONCENTRATION: { thresholdPct: number };

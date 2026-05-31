@@ -10,6 +10,7 @@ import { MobileNav } from "@/components/mobile-nav";
 import { getThemeFromCookie } from "@/lib/theme";
 import { getUserTickers } from "@/lib/portfolio/queries";
 import { countUnreadEvents } from "@/lib/signals/queries";
+import { getUserPreferences } from "@/lib/preferences";
 
 type TopbarProps = {
   title: ReactNode;
@@ -23,9 +24,14 @@ export async function Topbar({ title, backHref, rightSlot }: TopbarProps) {
     getThemeFromCookie(),
   ]);
   const user = session?.user;
-  const [tickers, notifications] = user
-    ? await Promise.all([getUserTickers(user.id), countUnreadEvents(user.id)])
-    : [[], 0];
+  const [tickers, notifications, preferences] = user
+    ? await Promise.all([
+        getUserTickers(user.id),
+        countUnreadEvents(user.id),
+        getUserPreferences(user.id),
+      ])
+    : [[], 0, null];
+  const showBadge = preferences?.showNotificationBadge !== false;
 
   return (
     <header className="sticky top-0 z-10 flex h-[72px] shrink-0 items-center gap-2 border-b border-border bg-bg px-4 md:gap-3 md:px-6 lg:gap-[18px] lg:px-[26px]">
@@ -54,13 +60,13 @@ export async function Topbar({ title, backHref, rightSlot }: TopbarProps) {
       <Link
         href="/alerts"
         aria-label={
-          notifications > 0
+          showBadge && notifications > 0
             ? `Alerts — ${notifications} unread`
             : "Alerts"
         }
         className="relative hidden h-10 w-10 shrink-0 items-center justify-center rounded-full bg-panel text-text transition-colors hover:bg-panel-2 sm:flex"
       >
-        {notifications > 0 ? (
+        {showBadge && notifications > 0 ? (
           <span className="absolute -right-[3px] -top-[3px] flex h-[18px] min-w-[18px] items-center justify-center rounded-[9px] border-2 border-bg bg-danger px-[5px] text-[11px] font-bold text-white">
             {notifications > 99 ? "99+" : notifications}
           </span>

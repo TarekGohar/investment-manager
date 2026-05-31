@@ -23,15 +23,19 @@ model User {
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
-  sessions        Session[]
-  accounts        Account[]
-  brokerages      Brokerage[]
-  transactions    Transaction[]
-  watchlist       WatchlistItem[]
-  aiConversations AIConversation[]
-  alerts          Alert[]
-  alertEvents     AlertEvent[]
-  aiAnalyses      AIAnalysis[]
+  sessions          Session[]
+  accounts          Account[]
+  brokerages        Brokerage[]
+  transactions      Transaction[]
+  watchlist         WatchlistItem[]
+  aiConversations   AIConversation[]
+  alerts            Alert[]
+  alertEvents       AlertEvent[]
+  aiAnalyses        AIAnalysis[]
+  contributionRooms ContributionRoom[]
+  snapshots         PortfolioSnapshot[]
+  investmentPolicy  InvestmentPolicy?
+  theses            Thesis[]
 
   @@map("user")
 }
@@ -96,13 +100,28 @@ enum TransactionKind {
   TRANSFER_OUT
 }
 
+enum BrokerageKind {
+  NON_REGISTERED
+  JOINT_NON_REGISTERED
+  TFSA
+  RRSP
+  FHSA
+  RESP
+  LIRA
+  RRIF
+  CORPORATE
+}
+
 model Brokerage {
-  id        String   @id @default(cuid())
+  id        String        @id @default(cuid())
   userId    String
   name      String
-  currency  String   @default("USD")
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  // Account type — drives tax treatment. NON_REGISTERED contributes to the
+  // ACB pool; TFSA/RRSP/FHSA/RESP track contribution room and have no ACB.
+  kind      BrokerageKind @default(NON_REGISTERED)
+  currency  String        @default("CAD")
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
 
   user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   transactions Transaction[]
@@ -110,6 +129,27 @@ model Brokerage {
   @@unique([userId, name])
   @@index([userId])
   @@map("brokerage")
+}
+
+// Per-user, per-account-type, per-year contribution room. Populated from
+// the CRA Notice of Assessment / MyCRA portal. Used room is derived from
+// BUY transactions in registered brokerages; remaining = roomAvailable - used.
+model ContributionRoom {
+  id            String        @id @default(cuid())
+  userId        String
+  kind          BrokerageKind // TFSA | RRSP | FHSA | RESP
+  year          Int
+  // The total room available this year, including carry-forward.
+  roomAvailable Decimal       @db.Decimal(18, 2)
+  notes         String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, kind, year])
+  @@index([userId])
+  @@map("contribution_room")
 }
 
 model Transaction {
@@ -123,6 +163,10 @@ model Transaction {
   // For BUY/SELL: per-share. For DIVIDEND: total dividend received. For SPLIT: 0.
   price       Decimal         @db.Decimal(18, 4)
   fees        Decimal         @default(0) @db.Decimal(18, 4)
+  // For DIVIDEND on foreign securities held in non-registered accounts: the
+  // amount of foreign withholding tax withheld at source. Recoverable via
+  // T1 foreign tax credit. Zero or null otherwise.
+  foreignTaxWithheld Decimal? @db.Decimal(18, 4)
   occurredAt  DateTime
   note        String?
   // For SPLIT only: new shares per old share (e.g. 2 for a 2-for-1).
@@ -331,6 +375,133 @@ enum AnalysisKind {
   EOD_DAILY
   WEEKLY
   ON_ALERT
+  QUARTERLY_DEEP
+}
+
+enum FilingType {
+  // EDGAR
+  TEN_K           // 10-K   annual
+  TEN_Q           // 10-Q   quarterly
+  EIGHT_K         // 8-K    material event
+  // SEDAR+
+  ANNUAL_INFO_FORM
+  MD_AND_A
+  ANNUAL_FINANCIAL_STATEMENTS
+  INTERIM_FINANCIAL_STATEMENTS
+  MATERIAL_CHANGE_REPORT
+  // Misc
+  OTHER
+}
+
+enum FilingSource {
+  EDGAR
+  SEDAR_PLUS
+}
+
+enum ThesisStatus {
+  ACTIVE
+  TRIMMED
+  EXITED
+  INVALIDATED
+}
+
+/// Investment policy statement. One row per user. Targets and behavioral
+/// thresholds are user-supplied — nulls disable the corresponding checks.
+model InvestmentPolicy {
+  id                  String   @id @default(cuid())
+  userId              String   @unique
+  /// Target asset allocation as percentages keyed by category, e.g.
+  /// { "Equity": 60, "Bonds": 30, "Cash": 10 }. Sum should be ~100.
+  targetAllocation    Json     @default("{}")
+  /// Target geographic split, e.g. { "Canada": 40, "US": 50, "Intl": 10 }
+  targetGeography     Json     @default("{}")
+  /// Drift threshold for rebalance alerts (percentage points, e.g. 5 = ±5pp).
+  driftThresholdPct   Decimal? @db.Decimal(5, 2)
+  /// Behavioral pattern thresholds. Null = check disabled.
+  panicSellDrawdownPct Decimal? @db.Decimal(5, 2)
+  panicSellWindowDays  Int?
+  fomoBuyRunupPct      Decimal? @db.Decimal(5, 2)
+  fomoBuyWindowDays    Int?
+  overtradingPerMonth  Int?
+  /// Per-ticker categorization, e.g. { "VFV.TO": "Equity:US", "VAB.TO": "Bonds:Canada" }
+  tickerCategories    Json     @default("{}")
+  notes               String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("investment_policy")
+}
+
+/// Per-position thesis. Captures why you own this name, what would
+/// invalidate the thesis, and a price target / horizon.
+model Thesis {
+  id                  String       @id @default(cuid())
+  userId              String
+  ticker              String
+  body                String
+  invalidationCriteria String?
+  priceTargetCad      Decimal?     @db.Decimal(18, 4)
+  horizonMonths       Int?
+  status              ThesisStatus @default(ACTIVE)
+  /// Markdown body of the most recent AI re-check ("is thesis still intact?")
+  lastAiReview        String?
+  lastReviewedAt      DateTime?
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, ticker])
+  @@index([userId, status])
+  @@map("thesis")
+}
+
+/// Daily portfolio NAV snapshot. Written by /api/cron/eod-snapshot. One row
+/// per (userId, date). `byKind` and `holdings` are JSON blobs so we don't
+/// proliferate join tables for what's effectively a frozen wire format.
+model PortfolioSnapshot {
+  id             String   @id @default(cuid())
+  userId         String
+  /// Calendar date (UTC) the snapshot represents. UNIQUE per user.
+  date           DateTime @db.Date
+  totalCost      Decimal  @db.Decimal(18, 2)
+  totalMarketValue Decimal @db.Decimal(18, 2)
+  totalRealized  Decimal  @db.Decimal(18, 2)
+  totalDividends Decimal  @db.Decimal(18, 2)
+  /// { NON_REGISTERED: { quantity, costBasis, marketValue }, ... }
+  byKind         Json
+  /// Per-ticker { ticker, quantity, costBasis, marketValue }
+  holdings       Json
+  createdAt      DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, date])
+  @@index([userId, date(sort: Desc)])
+  @@map("portfolio_snapshot")
+}
+
+model Filing {
+  id           String       @id @default(cuid())
+  ticker       String
+  type         FilingType
+  source       FilingSource
+  /// External accession number / document identifier, used for dedup.
+  externalId   String
+  title        String?
+  /// Public link to the filing (HTML viewer).
+  url          String
+  filedAt      DateTime
+  /// Extracted plaintext body, lazily populated by the cron / on-demand fetch.
+  body         String?
+  fetchedAt    DateTime     @default(now())
+
+  @@unique([source, externalId])
+  @@index([ticker, filedAt(sort: Desc)])
+  @@index([ticker, type, filedAt(sort: Desc)])
+  @@map("filing")
 }
 
 model AIAnalysis {

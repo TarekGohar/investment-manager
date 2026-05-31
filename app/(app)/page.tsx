@@ -6,7 +6,11 @@ import { PriceChart } from "@/components/charts/price-chart";
 import { TickerBadge } from "@/components/ticker-badge";
 import { AllocationDonut } from "@/components/allocation-donut";
 import { PMReadCard } from "@/components/pm-read-card";
+import { PerformanceCard } from "@/components/performance-card";
 import { getLatestAnalysis } from "@/lib/ai/reviews";
+import { getPerformanceSummary } from "@/lib/portfolio/performance-summary";
+import { analyzePortfolioLocation } from "@/lib/canadian/location";
+import { LocationBadge } from "@/components/location-badge";
 import {
   ArrowDownRightIcon,
   ArrowUpRightIcon,
@@ -16,6 +20,7 @@ import {
 import { auth } from "@/lib/auth";
 import { getEnrichedPortfolio, listTransactions } from "@/lib/portfolio/queries";
 import { investedCapitalSeries } from "@/lib/portfolio/holdings";
+import { getUserPreferences } from "@/lib/preferences";
 import {
   formatCurrency,
   formatPercent,
@@ -27,10 +32,21 @@ export default async function DashboardPage() {
   const session = await auth.api.getSession({ headers: await headers() });
   if (!session) redirect("/sign-in");
 
-  const [portfolio, latestReview] = await Promise.all([
+  const [portfolio, latestReview, preferences] = await Promise.all([
     getEnrichedPortfolio(session.user.id),
     getLatestAnalysis(session.user.id, "EOD_DAILY"),
+    getUserPreferences(session.user.id),
   ]);
+
+  const performance =
+    portfolio.holdings.length > 0
+      ? await getPerformanceSummary(session.user.id, preferences.performanceProfile)
+      : null;
+
+  const locationOverview =
+    portfolio.holdings.length > 0
+      ? await analyzePortfolioLocation(portfolio.holdings)
+      : null;
 
   if (portfolio.holdings.length === 0) {
     return (
@@ -122,15 +138,54 @@ export default async function DashboardPage() {
             />
           </div>
 
+          {/* Performance */}
+          {performance ? (
+            <div className="mb-[26px]">
+              <PerformanceCard summary={performance} />
+            </div>
+          ) : null}
+
           {/* Allocation */}
-          <AllocationDonut
-            items={portfolio.holdings.map((h) => ({
-              ticker: h.ticker,
-              value: h.marketValue ?? h.costBasis,
-            }))}
-            title="Allocation"
-            subtitle={portfolio.hasAnyQuote ? "By market value" : "By cost basis"}
-          />
+          {preferences.showAllocationDonut ? (
+            <AllocationDonut
+              items={portfolio.holdings.map((h) => ({
+                ticker: h.ticker,
+                value: h.marketValue ?? h.costBasis,
+              }))}
+              title="Allocation"
+              subtitle={portfolio.hasAnyQuote ? "By market value" : "By cost basis"}
+            />
+          ) : null}
+
+          {/* Tax-drag callout */}
+          {locationOverview &&
+          (locationOverview.totalEstimatedBleed > 0 ||
+            locationOverview.mislocatedCount > 0) ? (
+            <section className="mb-[26px] flex flex-wrap items-start justify-between gap-3 rounded-card border border-warning/30 bg-warning/5 px-4 py-4 md:px-6">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 text-[14px] font-semibold text-text">
+                  Asset location costing you{" "}
+                  <span className="text-warning">
+                    {formatCurrency(locationOverview.totalEstimatedBleed)}/yr
+                  </span>
+                </div>
+                <p className="mt-1 text-xs leading-relaxed text-muted">
+                  {locationOverview.mislocatedCount} mis-located position
+                  {locationOverview.mislocatedCount === 1 ? "" : "s"}
+                  {locationOverview.suboptimalCount > 0
+                    ? ` and ${locationOverview.suboptimalCount} sub-optimal`
+                    : ""}
+                  . Open each position&apos;s Tax tab for relocation guidance.
+                </p>
+              </div>
+              <Link
+                href="/tax"
+                className="rounded-[10px] border border-border bg-panel px-3 py-1.5 text-[12px] font-semibold text-text transition-colors hover:bg-panel-2"
+              >
+                Open tax view
+              </Link>
+            </section>
+          ) : null}
 
           {/* Holdings */}
           <div className="rounded-card border border-border bg-panel">
@@ -167,7 +222,7 @@ export default async function DashboardPage() {
                     <div className="min-w-0">
                       <div className="truncate text-[15px] font-semibold">{h.ticker}</div>
                       <div className="truncate text-xs text-muted">
-                        Avg {formatCurrency(h.avgCost)}
+                        ACB {formatCurrency(h.acb)}
                       </div>
                     </div>
                   </div>

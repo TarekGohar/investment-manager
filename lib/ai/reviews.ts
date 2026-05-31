@@ -70,7 +70,7 @@ function formatPortfolioSnapshot(p: EnrichedPortfolio): string {
         ? `unrealized ${formatSignedCurrency(h.unrealized)} (${formatPercent(h.unrealizedPct ?? 0)})`
         : "no live PnL";
     lines.push(
-      `- ${h.ticker}: ${h.quantity} sh @ avg ${formatCurrency(h.avgCost)} (cost basis ${formatCurrency(h.costBasis)}), now ${live}, ${day}, ${unrealized}, weight ${weight}`,
+      `- ${h.ticker}: ${h.quantity} sh @ ACB ${formatCurrency(h.acb)} (cost basis ${formatCurrency(h.costBasis)}), now ${live}, ${day}, ${unrealized}, weight ${weight}`,
     );
   }
   return lines.join("\n");

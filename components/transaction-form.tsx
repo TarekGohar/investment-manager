@@ -1,12 +1,21 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import {
   createTransactionAction,
   updateTransactionAction,
 } from "@/app/actions/transactions";
+import {
+  checkSuperficialLossAction,
+  type SuperficialLossCheck,
+} from "@/app/actions/superficial-loss";
+import {
+  checkContributionRoomImpactAction,
+  type ContributionRoomImpactCheck,
+} from "@/app/actions/contribution-room-check";
 import { useToast } from "@/components/toast-provider";
 import { formatCurrency } from "@/lib/format";
+import type { BrokerageKind } from "@/generated/prisma";
 
 const KINDS = ["BUY", "SELL", "DIVIDEND", "SPLIT"] as const;
 type Kind = (typeof KINDS)[number];
@@ -24,6 +33,7 @@ const inputClass =
 export type TransactionFormBrokerage = {
   id: string;
   name: string;
+  kind: BrokerageKind;
 };
 
 export type TransactionFormInitialValues = {
@@ -93,6 +103,73 @@ export function TransactionForm({
   const [note, setNote] = useState(initial?.note ?? "");
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+
+  // Pre-trade superficial-loss warning — only checked when BUY is selected
+  // and we have a ticker + date.
+  const [superficialCheck, setSuperficialCheck] = useState<SuperficialLossCheck | null>(null);
+  const [roomCheck, setRoomCheck] = useState<ContributionRoomImpactCheck | null>(null);
+
+  const selectedBrokerage = brokerages.find((b) => b.id === brokerageId);
+
+  useEffect(() => {
+    if (kind !== "BUY") {
+      setSuperficialCheck(null);
+      return;
+    }
+    const trimmed = ticker.trim().toUpperCase();
+    if (trimmed.length < 1 || !occurredAt) {
+      setSuperficialCheck(null);
+      return;
+    }
+    let cancelled = false;
+    // Light debounce to avoid spamming the action on every keystroke
+    const timer = window.setTimeout(async () => {
+      try {
+        const result = await checkSuperficialLossAction(trimmed, occurredAt);
+        if (!cancelled) setSuperficialCheck(result);
+      } catch {
+        if (!cancelled) setSuperficialCheck(null);
+      }
+    }, 350);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [kind, ticker, occurredAt]);
+
+  // Pre-trade contribution-room warning — fires when BUY is selected in a
+  // registered (TFSA/RRSP/FHSA/RESP) account and we can size the contribution.
+  useEffect(() => {
+    if (kind !== "BUY" || !selectedBrokerage || !occurredAt) {
+      setRoomCheck(null);
+      return;
+    }
+    const qN = Number(quantity);
+    const pN = Number(price);
+    const fN = Number(fees);
+    if (!Number.isFinite(qN) || !Number.isFinite(pN) || qN <= 0 || pN < 0) {
+      setRoomCheck(null);
+      return;
+    }
+    const amount = qN * pN + (Number.isFinite(fN) ? fN : 0);
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      try {
+        const result = await checkContributionRoomImpactAction(
+          selectedBrokerage.id,
+          occurredAt,
+          amount,
+        );
+        if (!cancelled) setRoomCheck(result);
+      } catch {
+        if (!cancelled) setRoomCheck(null);
+      }
+    }, 350);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [kind, selectedBrokerage, occurredAt, quantity, price, fees]);
 
   const showShareFields = kind === "BUY" || kind === "SELL";
   const showAmount = kind === "DIVIDEND";
@@ -267,6 +344,64 @@ export function TransactionForm({
               <span className="text-[15px] font-semibold tabular-nums">
                 {formatCurrency(total)}
               </span>
+            </div>
+          ) : null}
+          {kind === "BUY" && roomCheck?.tracked ? (
+            <div
+              className={`mb-3 rounded-[10px] border px-3 py-2.5 text-xs leading-relaxed ${
+                roomCheck.wouldExceed
+                  ? "border-danger/40 bg-danger/10 text-danger"
+                  : roomCheck.remainingAfter < 1000
+                    ? "border-warning/40 bg-warning/10 text-warning"
+                    : "border-border bg-bg/40 text-muted"
+              }`}
+            >
+              <div className="text-[13px] font-semibold">
+                {roomCheck.wouldExceed
+                  ? `Would exceed ${roomCheck.kind} room`
+                  : `${roomCheck.kind} room · ${roomCheck.year}`}
+              </div>
+              <div className="mt-1">
+                Room available: {formatCurrency(roomCheck.roomAvailable)} ·
+                Used: {formatCurrency(roomCheck.currentUsed)} · Remaining
+                before this BUY: {formatCurrency(roomCheck.remainingBefore)}
+              </div>
+              <div className="mt-1">
+                This contribution: {formatCurrency(roomCheck.proposedAmount)} →{" "}
+                remaining after: {formatCurrency(roomCheck.remainingAfter)}
+                {roomCheck.wouldExceed
+                  ? " — CRA penalises 1%/month on TFSA / FHSA over-contributions."
+                  : ""}
+              </div>
+            </div>
+          ) : null}
+          {kind === "BUY" && superficialCheck?.violates ? (
+            <div className="mb-3 rounded-[10px] border border-warning/40 bg-warning/10 px-3 py-2.5 text-xs leading-relaxed text-warning">
+              <div className="text-[13px] font-semibold">
+                Superficial loss risk
+              </div>
+              <div className="mt-1 text-warning/90">
+                You sold {superficialCheck.ticker} at a loss of{" "}
+                {formatCurrency(superficialCheck.lossAmount)} on{" "}
+                {new Date(superficialCheck.saleDate).toLocaleDateString("en-CA", {
+                  month: "short",
+                  day: "numeric",
+                  year: "numeric",
+                })}
+                . Buying it back today violates the 30-day rule —{" "}
+                {superficialCheck.daysRemaining} day
+                {superficialCheck.daysRemaining === 1 ? "" : "s"} left in the window.
+                The loss will be disallowed and added to this purchase&apos;s ACB.
+              </div>
+              <div className="mt-1 text-warning/70">
+                To realize the loss cleanly, wait until{" "}
+                {new Date(superficialCheck.windowEndsAt).toLocaleDateString("en-CA", {
+                  month: "short",
+                  day: "numeric",
+                  year: "numeric",
+                })}
+                {" "}or buy a non-identical replacement (see /tax).
+              </div>
             </div>
           ) : null}
         </>

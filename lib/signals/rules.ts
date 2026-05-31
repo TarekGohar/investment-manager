@@ -60,20 +60,20 @@ export function evaluateDrawdown(
 
   for (const ticker of tickers) {
     const holding = ctx.portfolio.holdings.find((h) => h.ticker === ticker);
-    if (!holding || holding.avgCost <= 0 || holding.marketPrice == null) continue;
+    if (!holding || holding.acb <= 0 || holding.marketPrice == null) continue;
 
-    const drawdownPct = ((holding.marketPrice - holding.avgCost) / holding.avgCost) * 100;
+    const drawdownPct = ((holding.marketPrice - holding.acb) / holding.acb) * 100;
     if (drawdownPct > -params.thresholdPct) continue;
 
     events.push({
       alertId: alert.id,
       userId: alert.userId,
       ticker,
-      message: `${ticker} is ${formatPercent(drawdownPct)} from your avg cost of ${formatCurrency(holding.avgCost)} (now ${formatCurrency(holding.marketPrice)})`,
+      message: `${ticker} is ${formatPercent(drawdownPct)} from your ACB of ${formatCurrency(holding.acb)} (now ${formatCurrency(holding.marketPrice)})`,
       data: {
         ticker,
         currentPrice: holding.marketPrice,
-        avgCost: holding.avgCost,
+        acb: holding.acb,
         drawdownPct,
         thresholdPct: params.thresholdPct,
       },

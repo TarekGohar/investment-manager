@@ -5,12 +5,18 @@ import { Topbar } from "@/components/topbar";
 import { SignOutButton } from "@/components/sign-out-button";
 import { BrokeragesSection } from "@/components/brokerages-section";
 import { MailgunTestButton } from "@/components/mailgun-test-button";
+import { PreferencesSection } from "@/components/preferences-section";
+import { TaxProfileSection } from "@/components/tax-profile-section";
+import { PerformanceProfileSection } from "@/components/performance-profile-section";
+import { ContributionRoomSection } from "@/components/contribution-room-section";
+import { listContributionRooms } from "@/lib/canadian/contribution-room";
 import { ChevronDownIcon } from "@/components/icons";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { getThemeFromCookie } from "@/lib/theme";
 import { getModel, getProviderName } from "@/lib/ai";
 import { mailgunStatus } from "@/lib/mailgun";
+import { getUserPreferences } from "@/lib/preferences";
 
 const PROVIDER_LABEL: Record<string, string> = {
   openai: "OpenAI (cloud)",
@@ -22,14 +28,18 @@ export default async function SettingsPage() {
   const session = await auth.api.getSession({ headers: await headers() });
   if (!session) redirect("/sign-in");
 
-  const [brokerages, theme] = await Promise.all([
+  const [brokerages, theme, preferences, contributionRooms] = await Promise.all([
     prisma.brokerage.findMany({
       where: { userId: session.user.id },
       orderBy: { createdAt: "asc" },
       include: { _count: { select: { transactions: true } } },
     }),
     getThemeFromCookie(),
+    getUserPreferences(session.user.id),
+    listContributionRooms(session.user.id),
   ]);
+
+  const currentYear = new Date().getUTCFullYear();
 
   const provider = getProviderName();
   const model = getModel();
@@ -67,6 +77,7 @@ export default async function SettingsPage() {
               brokerages={brokerages.map((b) => ({
                 id: b.id,
                 name: b.name,
+                kind: b.kind,
                 currency: b.currency,
                 createdAt: b.createdAt,
                 transactionCount: b._count.transactions,
@@ -75,8 +86,44 @@ export default async function SettingsPage() {
           </Section>
 
           <Section
+            title="Preferences"
+            description="Toggle AI background jobs, notifications, and per-page fetches. Saved per user."
+            defaultOpen
+          >
+            <PreferencesSection initial={preferences} />
+          </Section>
+
+          <Section
+            title="Tax profile"
+            description="Your combined federal + provincial marginal rates. Used for TLH dollar sizing, after-tax dividend math, and withdrawal analysis. Blank fields stay blank — no defaults assumed."
+            defaultOpen
+          >
+            <TaxProfileSection initial={preferences.taxProfile} />
+          </Section>
+
+          <Section
+            title="Performance profile"
+            description="Benchmark ticker + risk-free rate for TWR-vs-benchmark, beta, and Sharpe. Pick what you actually want to compare against — nothing is assumed."
+            defaultOpen
+          >
+            <PerformanceProfileSection initial={preferences.performanceProfile} />
+          </Section>
+
+          <Section
+            title="Contribution room"
+            description="TFSA / RRSP / FHSA / RESP room you've entered from your CRA Notice of Assessment. Used by the transaction form and /tax page to warn about over-contributions."
+            defaultOpen
+          >
+            <ContributionRoomSection
+              entries={contributionRooms}
+              currentYear={currentYear}
+            />
+          </Section>
+
+          <Section
             title="Appearance"
             description="Theme syncs across this device via cookie."
+            defaultOpen
           >
             <Row label="Current theme">
               <span className="capitalize">{theme}</span>
@@ -89,6 +136,7 @@ export default async function SettingsPage() {
           <Section
             title="AI assistant"
             description="Switch providers by editing AI_PROVIDER in .env.local."
+            defaultOpen
           >
             <Row label="Provider">{PROVIDER_LABEL[provider] ?? provider}</Row>
             <Row label={provider === "azure-openai" ? "Deployment" : "Model"}>
@@ -103,6 +151,7 @@ export default async function SettingsPage() {
           <Section
             title="Email"
             description="Mailgun is used for magic-link sign-in and alert digests. Without it, the app falls back to logging emails in the dev console."
+            defaultOpen
           >
             <Row label="Status">
               <span
@@ -135,24 +184,35 @@ export default async function SettingsPage() {
             </div>
           </Section>
 
-          <Section title="Cron" description="Background jobs scheduled by Vercel Cron.">
+          <Section
+            title="Cron"
+            description="Background jobs scheduled by Vercel Cron."
+            defaultOpen
+          >
             <Row label="Refresh quotes">Every 30 minutes</Row>
+            <Row label="Classify news (AI)">Hourly at :15</Row>
             <Row label="Run alerts">Every 30 minutes (2 min after refresh)</Row>
             <Row label="Daily PM review">21:15 UTC, Mon–Fri</Row>
             <Row label="Weekly PM review">13:00 UTC, Sunday</Row>
             <p className="mt-3 text-xs text-muted-2">
               Local dev does not run crons — use the manual triggers (e.g. &ldquo;Run now&rdquo;
               on /alerts and &ldquo;Regenerate&rdquo; on the dashboard PM&apos;s read card).
+              Toggles in <strong>Preferences</strong> above let you disable AI jobs you don&apos;t
+              want running.
             </p>
           </Section>
 
-          <Section title="Data sources" description="Where market data comes from.">
+          <Section
+            title="Data sources"
+            description="Where market data comes from."
+            defaultOpen
+          >
             <Row label="Quotes / news / fundamentals">Finnhub (15-min delayed)</Row>
             <Row label="Historical candles">Yahoo Finance</Row>
             <Row label="Database">Supabase Postgres (ca-central-1)</Row>
           </Section>
 
-          <Section title="Session">
+          <Section title="Session" defaultOpen>
             <div className="flex justify-end">
               <SignOutButton />
             </div>

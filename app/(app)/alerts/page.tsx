@@ -11,19 +11,23 @@ import {
   markAllEventsRead,
 } from "@/lib/signals/queries";
 import { getUserTickers } from "@/lib/portfolio/queries";
+import { getUserPreferences } from "@/lib/preferences";
 
 export default async function AlertsPage() {
   const session = await auth.api.getSession({ headers: await headers() });
   if (!session) redirect("/sign-in");
 
-  const [alerts, events, tickers] = await Promise.all([
+  const [alerts, events, tickers, preferences] = await Promise.all([
     listAlertsForUser(session.user.id),
     listRecentEvents(session.user.id, 30),
     getUserTickers(session.user.id),
+    getUserPreferences(session.user.id),
   ]);
 
-  // Snapshot taken — clear unread badge for subsequent navigations
-  await markAllEventsRead(session.user.id);
+  // Honor the user's auto-mark preference
+  if (preferences.autoMarkEventsRead) {
+    await markAllEventsRead(session.user.id);
+  }
 
   return (
     <>

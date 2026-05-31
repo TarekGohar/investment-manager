@@ -6,20 +6,24 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { BrokerageKind } from "@/generated/prisma";
 
 const NameSchema = z.string().trim().min(1, "Name is required.").max(48);
 const CurrencySchema = z
   .string()
   .trim()
   .toUpperCase()
-  .regex(/^[A-Z]{3}$/, "Currency must be a 3-letter code (e.g. USD).")
-  .default("USD");
+  .regex(/^[A-Z]{3}$/, "Currency must be a 3-letter code (e.g. CAD).")
+  .default("CAD");
+const KindSchema = z.nativeEnum(BrokerageKind);
 
 type ActionResult = { ok: true } | { ok: false; error: string };
 
 function refresh() {
   revalidatePath("/settings");
   revalidatePath("/transactions");
+  revalidatePath("/");
+  revalidatePath("/portfolio");
 }
 
 export async function createBrokerageAction(formData: FormData): Promise<ActionResult> {
@@ -27,9 +31,11 @@ export async function createBrokerageAction(formData: FormData): Promise<ActionR
   if (!session) redirect("/sign-in");
 
   const name = NameSchema.safeParse(formData.get("name"));
-  const currency = CurrencySchema.safeParse(formData.get("currency") ?? "USD");
+  const currency = CurrencySchema.safeParse(formData.get("currency") ?? "CAD");
+  const kind = KindSchema.safeParse(formData.get("kind") ?? "NON_REGISTERED");
   if (!name.success) return { ok: false, error: name.error.issues[0].message };
   if (!currency.success) return { ok: false, error: currency.error.issues[0].message };
+  if (!kind.success) return { ok: false, error: "Invalid account kind." };
 
   const existing = await prisma.brokerage.findUnique({
     where: { userId_name: { userId: session.user.id, name: name.data } },
@@ -42,6 +48,7 @@ export async function createBrokerageAction(formData: FormData): Promise<ActionR
       userId: session.user.id,
       name: name.data,
       currency: currency.data,
+      kind: kind.data,
     },
   });
 
@@ -80,6 +87,31 @@ export async function renameBrokerageAction(
   }
 
   await prisma.brokerage.update({ where: { id }, data: { name: parsed.data } });
+  refresh();
+  return { ok: true };
+}
+
+export async function setBrokerageKindAction(
+  id: string,
+  newKind: string,
+): Promise<ActionResult> {
+  const session = await auth.api.getSession({ headers: await headers() });
+  if (!session) redirect("/sign-in");
+
+  const parsed = KindSchema.safeParse(newKind);
+  if (!parsed.success) return { ok: false, error: "Invalid account kind." };
+
+  const existing = await prisma.brokerage.findUnique({
+    where: { id },
+    select: { userId: true, kind: true },
+  });
+  if (!existing || existing.userId !== session.user.id) {
+    return { ok: false, error: "Brokerage not found." };
+  }
+
+  if (existing.kind === parsed.data) return { ok: true };
+
+  await prisma.brokerage.update({ where: { id }, data: { kind: parsed.data } });
   refresh();
   return { ok: true };
 }

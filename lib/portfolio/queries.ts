@@ -1,19 +1,31 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
-import type { Transaction } from "@/generated/prisma";
+import type { Transaction, Brokerage } from "@/generated/prisma";
 import { getQuotes } from "@/lib/marketdata";
 import { deriveHoldings, summarize } from "./holdings";
-import type { EnrichedHolding, EnrichedPortfolio, Holding, PortfolioSummary, Tx } from "./types";
+import type {
+  EnrichedHolding,
+  EnrichedPortfolio,
+  Holding,
+  PortfolioSummary,
+  Tx,
+} from "./types";
 
-function serializeTx(t: Transaction): Tx {
+type TransactionWithBrokerage = Transaction & {
+  brokerage: { kind: Brokerage["kind"] };
+};
+
+function serializeTx(t: TransactionWithBrokerage): Tx {
   return {
     id: t.id,
     brokerageId: t.brokerageId,
+    brokerageKind: t.brokerage.kind,
     ticker: t.ticker,
     kind: t.kind,
     quantity: t.quantity.toNumber(),
     price: t.price.toNumber(),
     fees: t.fees.toNumber(),
+    foreignTaxWithheld: t.foreignTaxWithheld ? t.foreignTaxWithheld.toNumber() : 0,
     occurredAt: t.occurredAt,
     note: t.note,
     splitRatio: t.splitRatio ? t.splitRatio.toNumber() : null,
@@ -30,6 +42,7 @@ export async function listTransactions(
   const rows = await prisma.transaction.findMany({
     where,
     orderBy: { occurredAt: "desc" },
+    include: { brokerage: { select: { kind: true } } },
   });
   return rows.map(serializeTx);
 }
@@ -38,20 +51,28 @@ export async function getPortfolio(userId: string): Promise<PortfolioSummary> {
   const rows = await prisma.transaction.findMany({
     where: { userId },
     orderBy: { occurredAt: "asc" },
+    include: { brokerage: { select: { kind: true } } },
   });
   return summarize(deriveHoldings(rows.map(serializeTx)));
 }
 
-export async function getHolding(userId: string, ticker: string): Promise<Holding | null> {
+export async function getHolding(
+  userId: string,
+  ticker: string,
+): Promise<Holding | null> {
   const rows = await prisma.transaction.findMany({
     where: { userId, ticker: ticker.toUpperCase() },
     orderBy: { occurredAt: "asc" },
+    include: { brokerage: { select: { kind: true } } },
   });
   const holdings = deriveHoldings(rows.map(serializeTx));
   return holdings[0] ?? null;
 }
 
-export async function getTransactionHistory(userId: string, ticker: string): Promise<Tx[]> {
+export async function getTransactionHistory(
+  userId: string,
+  ticker: string,
+): Promise<Tx[]> {
   return listTransactions(userId, { ticker });
 }
 
@@ -68,6 +89,7 @@ export async function getEnrichedPortfolio(userId: string): Promise<EnrichedPort
       totalDayChangePct: 0,
       totalRealized: summary.totalRealized,
       totalDividends: summary.totalDividends,
+      totalForeignTaxWithheld: summary.totalForeignTaxWithheld,
       quoteAsOf: null,
       hasAnyQuote: false,
     };
@@ -89,6 +111,8 @@ export async function getEnrichedPortfolio(userId: string): Promise<EnrichedPort
     }
     const marketPrice = q?.price ?? null;
     const marketValue = marketPrice != null ? marketPrice * h.quantity : null;
+    // Unrealized gain is the gap vs total cost basis (non-reg + registered combined).
+    // Tax-relevant unrealized = (marketPrice - ACB) * nonRegQuantity, surfaced in Tax view.
     const unrealized = marketValue != null ? marketValue - h.costBasis : null;
     const unrealizedPct =
       unrealized != null && h.costBasis > 0 ? (unrealized / h.costBasis) * 100 : null;
@@ -129,6 +153,7 @@ export async function getEnrichedPortfolio(userId: string): Promise<EnrichedPort
     totalDayChangePct,
     totalRealized: summary.totalRealized,
     totalDividends: summary.totalDividends,
+    totalForeignTaxWithheld: summary.totalForeignTaxWithheld,
     quoteAsOf: latestAsOf,
     hasAnyQuote,
   };
@@ -139,10 +164,6 @@ export type UserTicker = {
   source: "holding" | "watchlist";
 };
 
-/**
- * All tickers the user has touched — current/past holdings plus watchlist.
- * Used for in-app search.
- */
 export async function getUserTickers(userId: string): Promise<UserTicker[]> {
   const [txTickers, watch] = await Promise.all([
     prisma.transaction.findMany({
@@ -172,7 +193,9 @@ export async function isWatched(userId: string, ticker: string): Promise<boolean
   return Boolean(row);
 }
 
-export async function listWatchlist(userId: string): Promise<{ ticker: string; addedAt: Date; note: string | null }[]> {
+export async function listWatchlist(
+  userId: string,
+): Promise<{ ticker: string; addedAt: Date; note: string | null }[]> {
   const rows = await prisma.watchlistItem.findMany({
     where: { userId },
     orderBy: { addedAt: "desc" },
@@ -184,7 +207,7 @@ export async function ensureDefaultBrokerage(userId: string): Promise<string> {
   const brokerage = await prisma.brokerage.upsert({
     where: { userId_name: { userId, name: "Main" } },
     update: {},
-    create: { userId, name: "Main", currency: "USD" },
+    create: { userId, name: "Main", currency: "CAD", kind: "NON_REGISTERED" },
     select: { id: true },
   });
   return brokerage.id;

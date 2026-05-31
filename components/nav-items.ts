@@ -27,6 +27,8 @@ export const NAV: NavItem[] = [
   },
   { label: "Watchlist", href: "/watchlist", icon: WatchlistIcon },
   { label: "Markets", href: "/markets", icon: MarketsIcon },
+  { label: "Tax", href: "/tax", icon: TransactionsIcon },
+  { label: "Policy", href: "/policy", icon: PortfolioIcon },
   { label: "Transactions", href: "/transactions", icon: TransactionsIcon },
   { label: "AI Chat", href: "/chat", icon: ChatIcon },
   { label: "Alerts", href: "/alerts", icon: AlertsIcon },

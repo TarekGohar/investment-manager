@@ -19,6 +19,14 @@
     {
       "path": "/api/cron/weekly-review",
       "schedule": "0 13 * * 0"
+    },
+    {
+      "path": "/api/cron/pull-filings",
+      "schedule": "30 5 * * *"
+    },
+    {
+      "path": "/api/cron/eod-snapshot",
+      "schedule": "30 21 * * 1-5"
     }
   ]
 }

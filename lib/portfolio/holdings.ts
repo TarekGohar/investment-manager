@@ -1,23 +1,49 @@
-import type { Holding, PortfolioSummary, Tx } from "./types";
-
-type Lot = {
-  qty: number;
-  costPerShare: number;
-  openedAt: Date;
-};
+import type { BrokerageKind } from "@/generated/prisma";
+import type {
+  AccountSliceSummary,
+  Holding,
+  PortfolioSummary,
+  Tx,
+} from "./types";
+import {
+  detectSuperficialLosses,
+  type SuperficialLossViolation,
+} from "@/lib/canadian/superficial-loss";
 
 /**
- * Derive current holdings from a list of transactions using FIFO lot accounting.
+ * Canadian ACB-aware holding derivation.
  *
- * - BUY pushes a lot; fees are amortized into the lot's cost per share.
- * - SELL pops from the oldest lot first; realized gain = proceeds minus cost removed.
- * - DIVIDEND adds to totalDividends; does not affect lots.
- * - SPLIT scales all open lots' qty by the ratio and inverse-scales their price.
- * - TRANSFER_IN / TRANSFER_OUT behave like BUY / SELL but don't realize a gain.
+ * For NON_REGISTERED + JOINT_NON_REGISTERED brokerages (the "ACB pool"):
+ *   - BUYs: weighted-average ACB recomputed. fees fold into cost basis.
+ *   - SELLs: per-share ACB stays constant. Realized gain = proceeds - fees - qty * ACB.
+ *   - SPLITs: qty * ratio; per-share ACB / ratio. Total cost basis unchanged.
  *
- * Tickers with zero open lots are omitted from the result.
+ * For registered brokerages (TFSA / RRSP / FHSA / RESP / LIRA / RRIF):
+ *   - No ACB tracking, no realized gain (tax-free or tax-deferred at this level)
+ *   - Track running qty + money-invested for display only
+ *
+ * Returns one row per ticker, with non-reg and registered breakdowns plus
+ * a per-kind `byKind` slice so downstream code (asset location, tax view)
+ * can show how a position is distributed across account types.
  */
 export function deriveHoldings(transactions: Tx[]): Holding[] {
+  // Pass 1: detect superficial-loss violations across the whole history.
+  // Each violation tells us which transaction absorbs the disallowed loss
+  // (either remaining shares at the sale, or a specific future BUY).
+  const violations = detectSuperficialLosses(transactions);
+  const lossAtSale = new Map<string, number>(); // saleTxId → absorbed-at-remaining amount
+  const lossAtBuy = new Map<string, number>(); // buyTxId → absorbed-at-buy amount
+  for (const v of violations) {
+    if (v.absorbedBy.kind === "remaining") {
+      lossAtSale.set(v.saleTransactionId, (lossAtSale.get(v.saleTransactionId) ?? 0) + v.lossAmount);
+    } else {
+      lossAtBuy.set(
+        v.absorbedBy.transactionId,
+        (lossAtBuy.get(v.absorbedBy.transactionId) ?? 0) + v.lossAmount,
+      );
+    }
+  }
+
   const byTicker = new Map<string, Tx[]>();
   for (const tx of transactions) {
     const arr = byTicker.get(tx.ticker) ?? [];
@@ -28,91 +54,169 @@ export function deriveHoldings(transactions: Tx[]): Holding[] {
   const holdings: Holding[] = [];
 
   for (const [ticker, txns] of byTicker) {
-    const sorted = [...txns].sort((a, b) => a.occurredAt.getTime() - b.occurredAt.getTime());
+    const sorted = [...txns].sort(
+      (a, b) => a.occurredAt.getTime() - b.occurredAt.getTime(),
+    );
 
-    let lots: Lot[] = [];
+    // Non-registered pool (ACB-tracked)
+    let nonRegQty = 0;
+    let nonRegCostBasis = 0;
     let realizedGain = 0;
     let totalDividends = 0;
+    let totalForeignTax = 0;
     let firstOpenAt: Date | null = null;
 
+    // Per-kind ledger for the byKind breakdown
+    const byKind = emptyByKind();
+
     for (const tx of sorted) {
+      const isNonReg = isNonRegisteredKind(tx.brokerageKind);
+      const slice = byKind[tx.brokerageKind];
+
       switch (tx.kind) {
         case "BUY": {
-          const costPerShare = tx.quantity > 0 ? tx.price + tx.fees / tx.quantity : tx.price;
-          lots.push({ qty: tx.quantity, costPerShare, openedAt: tx.occurredAt });
           if (!firstOpenAt) firstOpenAt = tx.occurredAt;
+          // If this BUY absorbs a disallowed superficial loss from an earlier
+          // SELL, add that amount to its cost basis (CRA-mandated adjustment).
+          const absorbedLoss = lossAtBuy.get(tx.id) ?? 0;
+          const grossCost = tx.quantity * tx.price + tx.fees + absorbedLoss;
+          slice.quantity += tx.quantity;
+          slice.costBasis += grossCost;
+          if (isNonReg) {
+            nonRegQty += tx.quantity;
+            nonRegCostBasis += grossCost;
+          }
           break;
         }
 
         case "SELL": {
-          let remaining = tx.quantity;
           const proceeds = tx.quantity * tx.price - tx.fees;
-          let costRemoved = 0;
-          while (remaining > 1e-9 && lots.length > 0) {
-            const lot = lots[0];
-            const take = Math.min(remaining, lot.qty);
-            costRemoved += take * lot.costPerShare;
-            lot.qty -= take;
-            remaining -= take;
-            if (lot.qty <= 1e-9) lots.shift();
+          const absorbedAtSale = lossAtSale.get(tx.id) ?? 0;
+          const isSuperficial = absorbedAtSale > 0;
+          if (isNonReg && nonRegQty > 1e-9) {
+            const acb = nonRegCostBasis / nonRegQty;
+            const qtySold = Math.min(tx.quantity, nonRegQty);
+            const costRemoved = qtySold * acb;
+
+            if (isSuperficial) {
+              // Disallowed loss: cost basis reduces by *proceeds* (not the
+              // higher costRemoved). The difference stays in the pool,
+              // raising the ACB on remaining shares. Realized gain is NOT
+              // recorded for this sale.
+              nonRegCostBasis -= proceeds;
+              nonRegQty -= qtySold;
+            } else {
+              nonRegCostBasis -= costRemoved;
+              nonRegQty -= qtySold;
+              realizedGain += proceeds - costRemoved;
+            }
+            if (nonRegQty <= 1e-9) {
+              nonRegQty = 0;
+              nonRegCostBasis = 0;
+            }
           }
-          realizedGain += proceeds - costRemoved;
+          // Per-kind slice still tracks qty/cost for display
+          if (slice.quantity > 1e-9) {
+            const perShareCost = slice.costBasis / slice.quantity;
+            const qtySold = Math.min(tx.quantity, slice.quantity);
+            slice.quantity -= qtySold;
+            slice.costBasis -= qtySold * perShareCost;
+            if (slice.quantity <= 1e-9) {
+              slice.quantity = 0;
+              slice.costBasis = 0;
+            }
+          }
           break;
         }
 
         case "DIVIDEND":
-          // Dividend amount is stored in `price`; quantity is unused (we set it to 1)
+          // For DIVIDEND, `price` holds the total amount received (gross of FWT).
           totalDividends += tx.price;
+          totalForeignTax += tx.foreignTaxWithheld;
           break;
 
         case "SPLIT": {
           const ratio = tx.splitRatio ?? 1;
           if (ratio > 0) {
-            lots = lots.map((l) => ({
-              ...l,
-              qty: l.qty * ratio,
-              costPerShare: l.costPerShare / ratio,
-            }));
+            // Non-reg pool: qty scales, total cost basis unchanged → ACB/share divides
+            if (isNonReg) {
+              nonRegQty *= ratio;
+              // nonRegCostBasis stays the same (per-share ACB falls)
+            }
+            // Per-kind: same logic
+            slice.quantity *= ratio;
+            // slice.costBasis unchanged
           }
           break;
         }
 
-        case "TRANSFER_IN":
-          lots.push({
-            qty: tx.quantity,
-            costPerShare: tx.price,
-            openedAt: tx.occurredAt,
-          });
+        case "TRANSFER_IN": {
           if (!firstOpenAt) firstOpenAt = tx.occurredAt;
+          const grossCost = tx.quantity * tx.price;
+          slice.quantity += tx.quantity;
+          slice.costBasis += grossCost;
+          if (isNonReg) {
+            nonRegQty += tx.quantity;
+            nonRegCostBasis += grossCost;
+          }
           break;
+        }
 
         case "TRANSFER_OUT": {
-          let remaining = tx.quantity;
-          while (remaining > 1e-9 && lots.length > 0) {
-            const lot = lots[0];
-            const take = Math.min(remaining, lot.qty);
-            lot.qty -= take;
-            remaining -= take;
-            if (lot.qty <= 1e-9) lots.shift();
+          // Treat like SELL for accounting; CRA may deem this a disposition
+          // depending on the destination (non-reg → registered = deemed sale at FMV).
+          // We do the simple version: remove cost basis at current ACB,
+          // do not register a realized gain (user can convert to SELL if needed).
+          if (isNonReg && nonRegQty > 1e-9) {
+            const acb = nonRegCostBasis / nonRegQty;
+            const qtyOut = Math.min(tx.quantity, nonRegQty);
+            nonRegQty -= qtyOut;
+            nonRegCostBasis -= qtyOut * acb;
+            if (nonRegQty <= 1e-9) {
+              nonRegQty = 0;
+              nonRegCostBasis = 0;
+            }
+          }
+          if (slice.quantity > 1e-9) {
+            const perShareCost = slice.costBasis / slice.quantity;
+            const qtyOut = Math.min(tx.quantity, slice.quantity);
+            slice.quantity -= qtyOut;
+            slice.costBasis -= qtyOut * perShareCost;
+            if (slice.quantity <= 1e-9) {
+              slice.quantity = 0;
+              slice.costBasis = 0;
+            }
           }
           break;
         }
       }
     }
 
-    const totalQty = lots.reduce((sum, l) => sum + l.qty, 0);
-    if (totalQty <= 1e-9) continue;
+    // Sum the registered side from byKind for the summary fields
+    let regQty = 0;
+    let regCost = 0;
+    for (const kind of REGISTERED_KINDS) {
+      regQty += byKind[kind].quantity;
+      regCost += byKind[kind].costBasis;
+    }
 
-    const totalCost = lots.reduce((sum, l) => sum + l.qty * l.costPerShare, 0);
+    const totalQty = nonRegQty + regQty;
+    if (totalQty <= 1e-9) continue;
 
     holdings.push({
       ticker,
       quantity: totalQty,
-      avgCost: totalCost / totalQty,
-      costBasis: totalCost,
-      openedAt: firstOpenAt ?? sorted[0].occurredAt,
+      costBasis: nonRegCostBasis + regCost,
+      nonRegQuantity: nonRegQty,
+      nonRegCostBasis: nonRegCostBasis,
+      acb: nonRegQty > 0 ? nonRegCostBasis / nonRegQty : 0,
       realizedGain,
+      totalForeignTaxWithheld: totalForeignTax,
+      registeredQuantity: regQty,
+      registeredCostBasis: regCost,
+      openedAt: firstOpenAt ?? sorted[0].occurredAt,
       totalDividends,
+      byKind,
     });
   }
 
@@ -123,55 +227,102 @@ export function summarize(holdings: Holding[]): PortfolioSummary {
   let totalCost = 0;
   let totalRealized = 0;
   let totalDividends = 0;
+  let totalForeignTaxWithheld = 0;
   for (const h of holdings) {
     totalCost += h.costBasis;
     totalRealized += h.realizedGain;
     totalDividends += h.totalDividends;
+    totalForeignTaxWithheld += h.totalForeignTaxWithheld;
   }
-  return { holdings, totalCost, totalRealized, totalDividends };
+  return { holdings, totalCost, totalRealized, totalDividends, totalForeignTaxWithheld };
 }
 
 /**
- * For each transaction date, the running sum of invested capital (BUYs minus SELLs at cost basis).
- * Used to render the "Total invested" sparkline pre-market-data.
+ * Cumulative invested capital over time (the "Total invested" sparkline on
+ * the dashboard). Tracks net money put into positions, ACB-aware on non-reg
+ * sells.
  */
-export function investedCapitalSeries(transactions: Tx[]): { ts: number; close: number }[] {
-  const sorted = [...transactions].sort((a, b) => a.occurredAt.getTime() - b.occurredAt.getTime());
+export function investedCapitalSeries(
+  transactions: Tx[],
+): { ts: number; close: number }[] {
+  const sorted = [...transactions].sort(
+    (a, b) => a.occurredAt.getTime() - b.occurredAt.getTime(),
+  );
 
-  // Track per-ticker FIFO lots so SELLs remove cost at their actual basis
-  const lots = new Map<string, Lot[]>();
+  type PoolState = { qty: number; cost: number };
+  const nonRegPool = new Map<string, PoolState>(); // by ticker
+  const regPool = new Map<string, PoolState>(); // by (ticker:kind) key
+
   let invested = 0;
   const series: { ts: number; close: number }[] = [];
 
   for (const tx of sorted) {
+    const isNonReg = isNonRegisteredKind(tx.brokerageKind);
+
     if (tx.kind === "BUY" || tx.kind === "TRANSFER_IN") {
-      const costPerShare = tx.quantity > 0 ? tx.price + tx.fees / tx.quantity : tx.price;
-      invested += tx.quantity * costPerShare;
-      const arr = lots.get(tx.ticker) ?? [];
-      arr.push({ qty: tx.quantity, costPerShare, openedAt: tx.occurredAt });
-      lots.set(tx.ticker, arr);
+      const cost = tx.quantity * tx.price + (tx.kind === "BUY" ? tx.fees : 0);
+      invested += cost;
+      const map = isNonReg ? nonRegPool : regPool;
+      const key = isNonReg ? tx.ticker : `${tx.ticker}:${tx.brokerageKind}`;
+      const p = map.get(key) ?? { qty: 0, cost: 0 };
+      p.qty += tx.quantity;
+      p.cost += cost;
+      map.set(key, p);
     } else if (tx.kind === "SELL" || tx.kind === "TRANSFER_OUT") {
-      let remaining = tx.quantity;
-      const arr = lots.get(tx.ticker) ?? [];
-      while (remaining > 1e-9 && arr.length > 0) {
-        const lot = arr[0];
-        const take = Math.min(remaining, lot.qty);
-        invested -= take * lot.costPerShare;
-        lot.qty -= take;
-        remaining -= take;
-        if (lot.qty <= 1e-9) arr.shift();
+      const map = isNonReg ? nonRegPool : regPool;
+      const key = isNonReg ? tx.ticker : `${tx.ticker}:${tx.brokerageKind}`;
+      const p = map.get(key);
+      if (p && p.qty > 1e-9) {
+        const perShare = p.cost / p.qty;
+        const qty = Math.min(tx.quantity, p.qty);
+        const removed = qty * perShare;
+        p.qty -= qty;
+        p.cost -= removed;
+        invested -= removed;
+        if (p.qty <= 1e-9) {
+          p.qty = 0;
+          p.cost = 0;
+        }
       }
-      lots.set(tx.ticker, arr);
     } else if (tx.kind === "SPLIT") {
-      const ratio = tx.splitRatio ?? 1;
-      if (ratio > 0) {
-        const arr = lots.get(tx.ticker) ?? [];
-        const next = arr.map((l) => ({ ...l, qty: l.qty * ratio, costPerShare: l.costPerShare / ratio }));
-        lots.set(tx.ticker, next);
-      }
+      // No money in/out; pool qty changes but cost basis unchanged → invested unchanged
     }
+
     series.push({ ts: tx.occurredAt.getTime(), close: Math.max(invested, 0) });
   }
 
   return series;
 }
+
+// ─── Helpers ──────────────────────────────────────────────────────────
+
+const NON_REG_KINDS: BrokerageKind[] = ["NON_REGISTERED", "JOINT_NON_REGISTERED"];
+const REGISTERED_KINDS: BrokerageKind[] = [
+  "TFSA",
+  "RRSP",
+  "FHSA",
+  "RESP",
+  "LIRA",
+  "RRIF",
+];
+const ALL_KINDS: BrokerageKind[] = [
+  ...NON_REG_KINDS,
+  ...REGISTERED_KINDS,
+  "CORPORATE",
+];
+
+export function isNonRegisteredKind(kind: BrokerageKind): boolean {
+  return kind === "NON_REGISTERED" || kind === "JOINT_NON_REGISTERED";
+}
+
+export function isRegisteredKind(kind: BrokerageKind): boolean {
+  return REGISTERED_KINDS.includes(kind);
+}
+
+function emptyByKind(): Record<BrokerageKind, AccountSliceSummary> {
+  const out = {} as Record<BrokerageKind, AccountSliceSummary>;
+  for (const k of ALL_KINDS) out[k] = { quantity: 0, costBasis: 0 };
+  return out;
+}
+
+export { NON_REG_KINDS, REGISTERED_KINDS };

@@ -13,6 +13,7 @@ import {
   isWatched,
 } from "@/lib/portfolio/queries";
 import { aboutFor } from "@/lib/portfolio/about";
+import { getUserPreferences } from "@/lib/preferences";
 import {
   getCandles,
   getFundamentals,
@@ -27,6 +28,28 @@ import {
   formatQty,
   formatSignedCurrency,
 } from "@/lib/format";
+import { analyzeHoldingLocation } from "@/lib/canadian/location";
+import { LocationBadge } from "@/components/location-badge";
+import { FilingsTab } from "@/components/filings-tab";
+import { ThesisCard } from "@/components/thesis-card";
+import { getLatestQuarterlyAnalysis } from "@/lib/ai/filings";
+import { getThesis } from "@/lib/policy/thesis";
+import { issuerSearchUrl } from "@/lib/filings/sedar";
+import { lookupCik } from "@/lib/filings/edgar";
+import { isNonRegisteredKind } from "@/lib/portfolio/holdings";
+import type { BrokerageKind } from "@/generated/prisma";
+
+const KIND_LABEL: Record<BrokerageKind, string> = {
+  NON_REGISTERED: "Non-registered",
+  JOINT_NON_REGISTERED: "Joint non-registered",
+  TFSA: "TFSA",
+  RRSP: "RRSP",
+  FHSA: "FHSA",
+  RESP: "RESP",
+  LIRA: "LIRA",
+  RRIF: "RRIF",
+  CORPORATE: "Corporate",
+};
 
 export default async function PositionPage({
   params,
@@ -38,6 +61,8 @@ export default async function PositionPage({
 
   const session = await auth.api.getSession({ headers: await headers() });
   if (!session) redirect("/sign-in");
+
+  const preferences = await getUserPreferences(session.user.id);
 
   const [
     holding,
@@ -54,8 +79,8 @@ export default async function PositionPage({
     getHolding(session.user.id, ticker),
     getTransactionHistory(session.user.id, ticker),
     getQuote(ticker),
-    getFundamentals(ticker),
-    getNews(ticker, 10),
+    preferences.fetchPositionFundamentals ? getFundamentals(ticker) : Promise.resolve(null),
+    preferences.fetchPositionNews ? getNews(ticker, 10) : Promise.resolve([]),
     getCandles(ticker, 5 * 365),
     getIntradayCandles(ticker, "1D"),
     getIntradayCandles(ticker, "1W"),
@@ -63,8 +88,27 @@ export default async function PositionPage({
     prisma.brokerage.findMany({
       where: { userId: session.user.id },
       orderBy: { createdAt: "asc" },
-      select: { id: true, name: true },
+      select: { id: true, name: true, kind: true },
     }),
+  ]);
+
+  const thesis = await getThesis(session.user.id, ticker);
+  const [filings, latestQuarterly, cikInfo] = await Promise.all([
+    prisma.filing.findMany({
+      where: { ticker },
+      orderBy: { filedAt: "desc" },
+      take: 30,
+      select: {
+        id: true,
+        type: true,
+        source: true,
+        url: true,
+        title: true,
+        filedAt: true,
+      },
+    }),
+    getLatestQuarterlyAnalysis(session.user.id, ticker),
+    lookupCik(ticker).catch(() => null),
   ]);
 
   if (!holding && transactions.length === 0 && !quote) notFound();
@@ -93,7 +137,7 @@ export default async function PositionPage({
           <h3 className="mb-4 text-[16px] font-semibold">Your position</h3>
           <div className="grid grid-cols-4 gap-4">
             <PosTile label="Shares" value={formatQty(holding.quantity)} />
-            <PosTile label="Avg cost" value={formatCurrency(holding.avgCost)} />
+            <PosTile label="ACB" value={formatCurrency(holding.acb)} />
             <PosTile label="Cost basis" value={formatCurrency(holding.costBasis)} />
             <PosTile
               label="Market value"
@@ -226,9 +270,218 @@ export default async function PositionPage({
     </section>
   ) : null;
 
+  // ─── Tax view ──────────────────────────────────────────────────
+  const locationAnalysis = holding
+    ? analyzeHoldingLocation({
+        ticker,
+        byKind: holding.byKind,
+        marketPrice: quote?.price ?? null,
+        fundamentals,
+      })
+    : null;
+
+  const taxableUnrealized =
+    holding && quote && holding.nonRegQuantity > 0
+      ? (quote.price - holding.acb) * holding.nonRegQuantity
+      : null;
+  const taxableUnrealizedAfterInclusion =
+    taxableUnrealized != null ? taxableUnrealized * 0.5 : null;
+
+  const taxSection = holding ? (
+    <>
+      {/* ACB summary */}
+      <section className="mb-[26px] rounded-card border border-border bg-panel px-6 py-[22px]">
+        <h3 className="mb-4 text-[16px] font-semibold">ACB &amp; capital gain</h3>
+        <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+          <PosTile
+            label="ACB (non-reg)"
+            value={
+              holding.nonRegQuantity > 0
+                ? `${formatCurrency(holding.acb)}/sh`
+                : "—"
+            }
+          />
+          <PosTile
+            label="Non-reg shares"
+            value={formatQty(holding.nonRegQuantity)}
+          />
+          <PosTile
+            label="Non-reg cost basis"
+            value={formatCurrency(holding.nonRegCostBasis)}
+          />
+          <PosTile
+            label="Realized P&L (lifetime)"
+            value={
+              holding.realizedGain === 0
+                ? "—"
+                : formatSignedCurrency(holding.realizedGain)
+            }
+            tone={
+              holding.realizedGain === 0
+                ? undefined
+                : holding.realizedGain > 0
+                  ? "up"
+                  : "down"
+            }
+          />
+          <PosTile
+            label="Unrealized cap gain"
+            value={
+              taxableUnrealized != null ? formatSignedCurrency(taxableUnrealized) : "—"
+            }
+            tone={
+              taxableUnrealized == null
+                ? undefined
+                : taxableUnrealized >= 0
+                  ? "up"
+                  : "down"
+            }
+            secondary={
+              taxableUnrealized != null
+                ? "non-reg slice × (price − ACB)"
+                : undefined
+            }
+          />
+          <PosTile
+            label="50% inclusion"
+            value={
+              taxableUnrealizedAfterInclusion != null
+                ? formatSignedCurrency(taxableUnrealizedAfterInclusion)
+                : "—"
+            }
+            secondary="taxable portion at disposition"
+            tone={
+              taxableUnrealizedAfterInclusion == null
+                ? undefined
+                : taxableUnrealizedAfterInclusion >= 0
+                  ? "up"
+                  : "down"
+            }
+          />
+          <PosTile
+            label="Dividends received"
+            value={
+              holding.totalDividends === 0 ? "—" : formatCurrency(holding.totalDividends)
+            }
+          />
+          <PosTile
+            label="Foreign tax withheld"
+            value={
+              holding.totalForeignTaxWithheld === 0
+                ? "—"
+                : formatCurrency(holding.totalForeignTaxWithheld)
+            }
+          />
+        </div>
+      </section>
+
+      {/* Per-account breakdown */}
+      <section className="mb-[26px] rounded-card border border-border bg-panel px-6 py-[22px]">
+        <div className="mb-4 flex flex-wrap items-baseline justify-between gap-2">
+          <h3 className="text-[16px] font-semibold">Per-account breakdown</h3>
+          {locationAnalysis && locationAnalysis.totalEstimatedBleed > 0 ? (
+            <span className="text-xs font-medium text-danger">
+              ~{formatCurrency(locationAnalysis.totalEstimatedBleed)}/yr in avoidable tax drag
+            </span>
+          ) : null}
+        </div>
+        {locationAnalysis && locationAnalysis.perKind.length > 0 ? (
+          <div className="space-y-3">
+            {locationAnalysis.perKind.map((slice) => {
+              const sliceData = holding.byKind[slice.currentKind];
+              const sliceQty = sliceData?.quantity ?? 0;
+              const sliceMV = quote ? quote.price * sliceQty : null;
+              return (
+                <div
+                  key={slice.currentKind}
+                  className="rounded-[10px] border border-border bg-bg/40 p-4"
+                >
+                  <div className="flex flex-wrap items-baseline justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[14px] font-semibold">
+                        {KIND_LABEL[slice.currentKind]}
+                      </span>
+                      <LocationBadge score={slice.score} />
+                    </div>
+                    <span className="text-xs text-muted">
+                      {formatQty(sliceQty)} sh ·{" "}
+                      {sliceMV != null ? formatCurrency(sliceMV) : "no quote"}
+                    </span>
+                  </div>
+                  <p className="mt-2 text-[13px] leading-relaxed text-soft">
+                    {slice.reasoning}
+                  </p>
+                  {slice.optimalKind && slice.optimalKind !== slice.currentKind ? (
+                    <p className="mt-1 text-xs text-muted-2">
+                      Optimal: <span className="font-semibold">{KIND_LABEL[slice.optimalKind]}</span>
+                      {slice.estimatedAnnualBleed > 0
+                        ? ` · ~${formatCurrency(slice.estimatedAnnualBleed)}/yr saved by relocating`
+                        : ""}
+                    </p>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <p className="text-sm text-muted">
+            No active position slices to analyze.
+          </p>
+        )}
+      </section>
+
+      {/* Projected annual dividend + FWT */}
+      {locationAnalysis && locationAnalysis.totalExpectedAnnualDividend > 0 ? (
+        <section className="mb-[26px] rounded-card border border-border bg-panel px-6 py-[22px]">
+          <h3 className="mb-4 text-[16px] font-semibold">Projected annual income</h3>
+          <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
+            <PosTile
+              label="Expected dividends"
+              value={formatCurrency(locationAnalysis.totalExpectedAnnualDividend)}
+              secondary="based on current yield"
+            />
+            <PosTile
+              label="Foreign tax cost"
+              value={formatCurrency(locationAnalysis.totalExpectedAnnualFWT)}
+              secondary="withheld at source"
+            />
+            <PosTile
+              label="Avoidable drag"
+              value={formatCurrency(locationAnalysis.totalEstimatedBleed)}
+              secondary="if relocated to optimal accounts"
+              tone={locationAnalysis.totalEstimatedBleed > 0 ? "down" : undefined}
+            />
+          </div>
+        </section>
+      ) : null}
+    </>
+  ) : null;
+
+  const filingsSection = (
+    <FilingsTab
+      ticker={ticker}
+      filings={filings.map((f) => ({
+        id: f.id,
+        type: f.type,
+        source: f.source,
+        url: f.url,
+        title: f.title,
+        filedAt: f.filedAt,
+      }))}
+      latestSummary={latestQuarterly}
+      sedarUrl={issuerSearchUrl(ticker)}
+      isUsListed={cikInfo != null}
+    />
+  );
+
+  const thesisSection = <ThesisCard ticker={ticker} initial={thesis} />;
+
   const tabs: PositionTab[] = [{ key: "Overview", content: overview }];
+  tabs.push({ key: "Thesis", content: thesisSection });
   if (newsSection) tabs.push({ key: "News", content: newsSection });
   if (fundamentalsSection) tabs.push({ key: "Fundamentals", content: fundamentalsSection });
+  tabs.push({ key: "Filings", content: filingsSection });
+  if (taxSection) tabs.push({ key: "Tax", content: taxSection });
   if (transactionsSection) tabs.push({ key: "Transactions", content: transactionsSection });
 
   return (

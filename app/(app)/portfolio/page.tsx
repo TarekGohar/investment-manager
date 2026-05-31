@@ -3,9 +3,13 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { Topbar } from "@/components/topbar";
 import { TickerBadge } from "@/components/ticker-badge";
+import { LocationBadge } from "@/components/location-badge";
 import { PortfolioIcon, PlusIcon } from "@/components/icons";
 import { auth } from "@/lib/auth";
 import { getEnrichedPortfolio } from "@/lib/portfolio/queries";
+import { analyzePortfolioLocation } from "@/lib/canadian/location";
+import { getCorrelationMatrix } from "@/lib/portfolio/performance-summary";
+import { CorrelationHeatmap } from "@/components/correlation-heatmap";
 import { formatCurrency, formatPercent, formatQty, formatSignedCurrency } from "@/lib/format";
 
 export default async function PortfolioPage() {
@@ -13,6 +17,14 @@ export default async function PortfolioPage() {
   if (!session) redirect("/sign-in");
 
   const portfolio = await getEnrichedPortfolio(session.user.id);
+  const [locationOverview, correlation] = await Promise.all([
+    portfolio.holdings.length > 0
+      ? analyzePortfolioLocation(portfolio.holdings)
+      : Promise.resolve(null),
+    portfolio.holdings.length > 1
+      ? getCorrelationMatrix(session.user.id)
+      : Promise.resolve(null),
+  ]);
 
   if (portfolio.holdings.length === 0) {
     return (
@@ -76,15 +88,16 @@ export default async function PortfolioPage() {
           </div>
 
           <div className="overflow-x-auto">
-            <div className="min-w-[860px]">
-          <div className="grid grid-cols-[1.7fr_0.55fr_0.85fr_0.85fr_0.7fr_0.85fr_0.95fr_0.55fr] gap-3 border-t border-border px-4 py-3 text-xs font-semibold uppercase tracking-wide text-muted md:px-6">
+            <div className="min-w-[980px]">
+          <div className="grid grid-cols-[1.6fr_0.55fr_0.8fr_0.8fr_0.6fr_0.8fr_0.9fr_0.7fr_0.5fr] gap-3 border-t border-border px-4 py-3 text-xs font-semibold uppercase tracking-wide text-muted md:px-6">
             <div>Position</div>
             <div className="text-right">Qty</div>
-            <div className="text-right">Avg cost</div>
+            <div className="text-right">ACB</div>
             <div className="text-right">Price</div>
             <div className="text-right">Day</div>
             <div className="text-right">Value</div>
             <div className="text-right">Unrealized</div>
+            <div className="text-right">Location</div>
             <div className="text-right">Wt</div>
           </div>
 
@@ -94,11 +107,12 @@ export default async function PortfolioPage() {
             const weight = denom > 0 ? (refValue / denom) * 100 : 0;
             const dayUp = (h.dayChangePct ?? 0) >= 0;
             const unrealizedUp = (h.unrealized ?? 0) >= 0;
+            const locScore = locationOverview?.byTicker.get(h.ticker)?.worstScore;
             return (
               <Link
                 key={h.ticker}
                 href={`/positions/${h.ticker}`}
-                className="grid grid-cols-[1.7fr_0.55fr_0.85fr_0.85fr_0.7fr_0.85fr_0.95fr_0.55fr] items-center gap-3 border-t border-border px-4 py-4 transition-colors hover:bg-hover md:px-6"
+                className="grid grid-cols-[1.6fr_0.55fr_0.8fr_0.8fr_0.6fr_0.8fr_0.9fr_0.7fr_0.5fr] items-center gap-3 border-t border-border px-4 py-4 transition-colors hover:bg-hover md:px-6"
               >
                 <div className="flex items-center gap-3 min-w-0">
                   <TickerBadge ticker={h.ticker} />
@@ -110,7 +124,7 @@ export default async function PortfolioPage() {
                   </div>
                 </div>
                 <div className="text-right text-[14px] tabular-nums">{formatQty(h.quantity)}</div>
-                <div className="text-right text-[14px] tabular-nums">{formatCurrency(h.avgCost)}</div>
+                <div className="text-right text-[14px] tabular-nums">{formatCurrency(h.acb)}</div>
                 <div className="text-right text-[14px] tabular-nums">
                   {h.marketPrice != null ? formatCurrency(h.marketPrice) : "—"}
                 </div>
@@ -135,6 +149,9 @@ export default async function PortfolioPage() {
                 >
                   {h.unrealized != null ? formatSignedCurrency(h.unrealized) : "—"}
                 </div>
+                <div className="flex justify-end">
+                  {locScore ? <LocationBadge score={locScore} size="sm" /> : null}
+                </div>
                 <div className="text-right text-[14px] text-muted tabular-nums">
                   {weight.toFixed(1)}%
                 </div>
@@ -149,6 +166,12 @@ export default async function PortfolioPage() {
           <p className="mt-4 text-xs text-muted-2">
             Prices as of {portfolio.quoteAsOf.toLocaleString()} · Finnhub (15-min delayed)
           </p>
+        ) : null}
+
+        {correlation ? (
+          <div className="mt-[26px]">
+            <CorrelationHeatmap data={correlation} />
+          </div>
         ) : null}
       </div>
     </>

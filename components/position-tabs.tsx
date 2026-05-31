@@ -3,7 +3,14 @@
 import { useState } from "react";
 import type { ReactNode } from "react";
 
-export type PositionTabKey = "Overview" | "News" | "Fundamentals" | "Transactions";
+export type PositionTabKey =
+  | "Overview"
+  | "Thesis"
+  | "News"
+  | "Fundamentals"
+  | "Filings"
+  | "Transactions"
+  | "Tax";
 
 export type PositionTab = {
   key: PositionTabKey;

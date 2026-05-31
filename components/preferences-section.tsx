@@ -3,49 +3,108 @@
 import { useState, useTransition } from "react";
 import { setPreferenceAction } from "@/app/actions/preferences";
 import { useToast } from "@/components/toast-provider";
-import type { UserPreferences } from "@/lib/preferences";
+import { BOOLEAN_PREFERENCE_KEYS, type UserPreferences } from "@/lib/preferences";
+
+type BooleanPreferenceKey = (typeof BOOLEAN_PREFERENCE_KEYS)[number];
 
 type ToggleItem = {
-  key: keyof UserPreferences;
+  key: BooleanPreferenceKey;
   title: string;
   description: string;
 };
 
-const TOGGLES: ToggleItem[] = [
+type Group = {
+  label: string;
+  items: ToggleItem[];
+};
+
+const GROUPS: Group[] = [
   {
-    key: "aiAutoDailyReview",
-    title: "Auto-generate daily PM review",
-    description:
-      "Run the daily portfolio review at 21:15 UTC on trading days. Disable to skip the AI call and the cost it incurs.",
+    label: "AI background jobs",
+    items: [
+      {
+        key: "aiAutoDailyReview",
+        title: "Auto-generate daily PM review",
+        description:
+          "Run the daily portfolio review at 21:15 UTC on trading days. Skips the AI call (and cost) when off.",
+      },
+      {
+        key: "aiAutoWeeklyReview",
+        title: "Auto-generate weekly PM review",
+        description: "Run the weekly deep-dive on Sundays at 13:00 UTC.",
+      },
+      {
+        key: "aiNewsClassification",
+        title: "Classify news with AI",
+        description:
+          "Hourly cron tags incoming news as INFO / MATERIAL / CRITICAL so NEWS_MATERIAL alerts can fire.",
+      },
+    ],
   },
   {
-    key: "aiAutoWeeklyReview",
-    title: "Auto-generate weekly PM review",
-    description: "Run the weekly deep-dive on Sundays at 13:00 UTC.",
+    label: "Notifications",
+    items: [
+      {
+        key: "emailDigestEnabled",
+        title: "Email alert digests",
+        description:
+          "Master switch for Mailgun digests. Each alert also needs the EMAIL channel enabled.",
+      },
+      {
+        key: "showNotificationBadge",
+        title: "Show unread badge in topbar",
+        description: "When off, the bell icon never shows a count — visit /alerts to see new events.",
+      },
+      {
+        key: "autoMarkEventsRead",
+        title: "Auto-mark events as read on visit",
+        description:
+          "Marks all unread events as read when you open /alerts. Disable to mark them manually.",
+      },
+    ],
   },
   {
-    key: "aiNewsClassification",
-    title: "Classify news with AI",
-    description:
-      "Runs hourly. Tags incoming news as INFO / MATERIAL / CRITICAL so NEWS_MATERIAL alerts can fire. A few cents per month at most.",
+    label: "Position page",
+    items: [
+      {
+        key: "fetchPositionNews",
+        title: "Fetch news on position pages",
+        description:
+          "Disable to speed up page loads and stop hitting the news API. Already-cached items still show.",
+      },
+      {
+        key: "fetchPositionFundamentals",
+        title: "Fetch fundamentals on position pages",
+        description: "Disable to skip Finnhub calls for company profile + metrics on each visit.",
+      },
+    ],
   },
   {
-    key: "emailDigestEnabled",
-    title: "Email alert digests",
-    description:
-      "Master switch for Mailgun digests. Individual alerts still need the EMAIL channel enabled.",
+    label: "Dashboard",
+    items: [
+      {
+        key: "showAllocationDonut",
+        title: "Show allocation donut",
+        description: "Display the holdings breakdown chart between stats and the holdings table.",
+      },
+    ],
   },
 ];
 
-export function PreferencesSection({
-  initial,
-}: {
-  initial: UserPreferences;
-}) {
+export function PreferencesSection({ initial }: { initial: UserPreferences }) {
   return (
-    <div className="space-y-3">
-      {TOGGLES.map((t) => (
-        <PreferenceRow key={t.key} item={t} initialValue={initial[t.key]} />
+    <div className="space-y-5">
+      {GROUPS.map((group) => (
+        <div key={group.label}>
+          <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted-2">
+            {group.label}
+          </div>
+          <div className="space-y-2">
+            {group.items.map((item) => (
+              <PreferenceRow key={item.key} item={item} initialValue={initial[item.key]} />
+            ))}
+          </div>
+        </div>
       ))}
     </div>
   );
