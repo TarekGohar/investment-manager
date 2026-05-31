@@ -93,8 +93,14 @@ export async function GET(req: Request) {
           filingId = existing.id;
         }
 
-        // Only deep-summarize the periodic filings.
-        const summarizable = item.type === "TEN_K" || item.type === "TEN_Q";
+        // Deep-summarize the periodic filings — both US domestic
+        // (10-K/Q) and Canadian foreign-issuer (40-F annual, 6-K
+        // quarterly + material).
+        const summarizable =
+          item.type === "TEN_K" ||
+          item.type === "TEN_Q" ||
+          item.type === "FORTY_F" ||
+          item.type === "SIX_K";
         if (!summarizable) continue;
 
         // Lazy-load body the first time we want to summarize.

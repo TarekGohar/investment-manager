@@ -134,6 +134,18 @@ function humanFormType(type: Filing["type"]): string {
       return "10-Q";
     case "EIGHT_K":
       return "8-K";
+    case "FORTY_F":
+      return "40-F (Canadian annual)";
+    case "SIX_K":
+      return "6-K (Canadian material)";
+    case "TWENTY_F":
+      return "20-F";
+    case "F_10":
+      return "F-10 prospectus";
+    case "F_X":
+      return "F-X consent";
+    case "F_3":
+      return "F-3 shelf";
     case "ANNUAL_INFO_FORM":
       return "AIF";
     case "MD_AND_A":

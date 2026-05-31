@@ -411,11 +411,20 @@ enum AnalysisKind {
 }
 
 enum FilingType {
-  // EDGAR
+  // EDGAR — domestic US issuer
   TEN_K           // 10-K   annual
   TEN_Q           // 10-Q   quarterly
   EIGHT_K         // 8-K    material event
-  // SEDAR+
+  // EDGAR — Canadian foreign private issuer (MJDS forms). Cross-listed
+  // names (SHOP, RY, TD, ENB, BMO, MFC, CNQ, BNS, BCE, CP, NTR, TRP, SU)
+  // file these instead of 10-K/Q. Coverage replaces SEDAR+ for these.
+  FORTY_F         // 40-F   annual report (Canadian 10-K equivalent)
+  SIX_K           // 6-K    quarterly + material change (Canadian 8-K/10-Q equivalent)
+  TWENTY_F        // 20-F   annual report for non-MJDS foreign issuers
+  F_10            // F-10   prospectus
+  F_X             // F-X    consent to service of process
+  F_3             // F-3    shelf prospectus
+  // SEDAR+ (set on Filing rows from CSE / TMX where applicable)
   ANNUAL_INFO_FORM
   MD_AND_A
   ANNUAL_FINANCIAL_STATEMENTS

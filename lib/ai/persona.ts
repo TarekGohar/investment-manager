@@ -65,11 +65,22 @@ Canadian tax-specific rules to honor:
 - Filings: when discussing what's happening at a specific company, prefer
   the AI quarterly read in \`get_latest_filing_analysis\` over your training
   data. The analysis is grounded in the actual filing text. If no analysis
-  exists yet, use \`get_all_filings\` to see what's indexed (EDGAR for US
-  names, CSE for .CN names with a saved listing, TMX metadata-only for
-  TSX/TSXV). Offer to read through specific filings; don't invent numbers
-  from training data. For Canadian filings without an analyzed PDF, you
-  can still cite the filing date + type to ground commentary.
+  exists yet, use \`get_all_filings\` to see what's indexed.
+  Coverage by listing:
+  - US-listed (and Canadian cross-listed): EDGAR — 10-K / 10-Q / 8-K
+    for US-domestic issuers, plus 40-F / 6-K / 20-F for Canadian MJDS
+    filers (RY, ENB, BCE, MFC, CNQ, BNS, CP, NTR, TRP, SU, etc.).
+    The 40-F is the Canadian annual report (10-K equivalent); 6-K is
+    the workhorse for quarterly + material disclosures. These are
+    full-text accessible and AI-summarizable.
+  - CSE-listed (.CN): direct PDF access via webapi.thecse.com once
+    the user links the CSE listing URL.
+  - TSX / TSXV not cross-listed in US: TMX gives filing metadata
+    (date + type + description) but no PDF URLs — SEDAR+ blocks
+    autonomous access. For deep reads on these, ask the user to paste
+    the filing text.
+  Offer to read through specific filings; don't invent numbers from
+  training data.
 - Insider activity: for US-listed names, \`get_insider_activity\` returns
   EDGAR Form 4 transactions. Cite material insider buys/sells (P / S
   codes) by name + date + share count when relevant to thesis discussion.

@@ -84,13 +84,38 @@ export type EdgarFilingListItem = {
 };
 
 const FORM_MAP: Record<string, FilingType> = {
+  // US domestic issuers
   "10-K": "TEN_K",
   "10-K/A": "TEN_K",
   "10-Q": "TEN_Q",
   "10-Q/A": "TEN_Q",
   "8-K": "EIGHT_K",
   "8-K/A": "EIGHT_K",
+  // Canadian foreign private issuers (MJDS) — most Canadian large-caps
+  // cross-listed in the US file these instead of 10-K/Q. SHOP, RY, TD,
+  // ENB, BMO, MFC, CNQ, BNS, BCE, CP, NTR, TRP, SU, etc.
+  "40-F": "FORTY_F",
+  "40-F/A": "FORTY_F",
+  "6-K": "SIX_K",
+  "6-K/A": "SIX_K",
+  "20-F": "TWENTY_F",
+  "20-F/A": "TWENTY_F",
+  "F-10": "F_10",
+  "F-10/A": "F_10",
+  "F-10EF": "F_10",
+  "F-X": "F_X",
+  "F-X/A": "F_X",
+  "F-3": "F_3",
+  "F-3/A": "F_3",
+  "F-3DPOS": "F_3",
 };
+
+/** Default form set for `listRecentFilings`. Includes both US and Canadian
+ *  foreign-issuer periodic + material event filings. */
+const DEFAULT_FORMS = [
+  "10-K", "10-Q", "8-K",            // US
+  "40-F", "6-K", "20-F",            // Canadian annual + material
+] as const;
 
 type SubmissionsResponse = {
   cik: string;
@@ -106,12 +131,20 @@ type SubmissionsResponse = {
 };
 
 /**
- * List recent filings for an issuer. Filters to 10-K / 10-Q / 8-K by default
- * — those are the most material for thesis tracking.
+ * List recent filings for an issuer. Defaults to US periodic forms
+ * (10-K / 10-Q / 8-K) AND Canadian foreign-issuer equivalents (40-F /
+ * 6-K / 20-F). The fan-out is automatic; if the issuer files no
+ * Canadian forms, that subset just returns empty.
+ *
+ * MJDS background: Canadian companies cross-listed on US exchanges use
+ * the SEC's Multijurisdictional Disclosure System. Instead of 10-K
+ * they file 40-F (or 20-F); instead of 10-Q + 8-K they file 6-K. So
+ * for SHOP, RY, ENB, etc., these forms ARE the equivalent of what
+ * SEDAR+ would otherwise gate.
  */
 export async function listRecentFilings(
   ticker: string,
-  opts: { since?: Date; forms?: Array<"10-K" | "10-Q" | "8-K"> } = {},
+  opts: { since?: Date; forms?: string[] } = {},
 ): Promise<EdgarFilingListItem[]> {
   const meta = await lookupCik(ticker);
   if (!meta) return [];
@@ -123,17 +156,16 @@ export async function listRecentFilings(
   const recent = json.filings?.recent;
   if (!recent) return [];
 
-  const allowed = new Set(opts.forms ?? ["10-K", "10-Q", "8-K"]);
+  const allowed = new Set(opts.forms ?? Array.from(DEFAULT_FORMS));
   const since = opts.since?.getTime() ?? 0;
   const items: EdgarFilingListItem[] = [];
 
   const n = recent.accessionNumber.length;
   for (let i = 0; i < n; i++) {
     const rawForm = recent.form[i];
-    if (!allowed.has(rawForm as "10-K" | "10-Q" | "8-K") && !rawForm.startsWith("10-K") && !rawForm.startsWith("10-Q") && !rawForm.startsWith("8-K")) {
-      continue;
-    }
-    if (!allowed.has(rawForm as "10-K" | "10-Q" | "8-K")) continue;
+    // Match exact forms OR amendments (e.g. "40-F/A" matches "40-F")
+    const baseForm = rawForm.replace(/\/A$/, "").replace(/EF$/, "").replace(/DPOS$/, "");
+    if (!allowed.has(rawForm) && !allowed.has(baseForm)) continue;
     const filedAt = new Date(recent.filingDate[i] + "T00:00:00Z");
     if (filedAt.getTime() < since) continue;
     const accessionNumber = recent.accessionNumber[i];
@@ -147,7 +179,7 @@ export async function listRecentFilings(
 
     items.push({
       accessionNumber,
-      type: FORM_MAP[rawForm] ?? "OTHER",
+      type: FORM_MAP[rawForm] ?? FORM_MAP[baseForm] ?? "OTHER",
       rawForm,
       primaryDocument,
       filedAt,
