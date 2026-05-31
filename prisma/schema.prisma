@@ -36,6 +36,7 @@ model User {
   snapshots         PortfolioSnapshot[]
   investmentPolicy  InvestmentPolicy?
   theses            Thesis[]
+  cookieSessions    ExternalCookieSession[]
 
   @@map("user")
 }
@@ -431,6 +432,35 @@ enum FilingSource {
   TMX
 }
 
+/// Per-user browser session cookies for external sources that gate access
+/// behind bot-management (SEDAR+ Radware + hCaptcha, etc.). The user
+/// solves the captcha in their real browser, copies the cookie header,
+/// and pastes it here. Server-side fetches reuse those cookies until
+/// they expire.
+model ExternalCookieSession {
+  id           String   @id @default(cuid())
+  userId       String
+  /// External source identifier: "SEDAR_PLUS", "CANADIAN_INSIDER", etc.
+  source       String
+  /// Raw Cookie header value (e.g. "__uzma=...; __uzmb=...; ...").
+  cookieHeader String   @db.Text
+  /// User-Agent string from the same browser session, so the fingerprint
+  /// stays consistent with the cookie batch.
+  userAgent    String?
+  /// Optional notes (e.g. "captured 2026-05-31 from Chrome").
+  notes        String?
+  /// Hint at when cookies were captured; not enforced.
+  expectedExpiry DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, source])
+  @@index([userId])
+  @@map("external_cookie_session")
+}
+
 /// Cached ticker → external-source ID mappings. Populated either by
 /// auto-resolvers (EDGAR CIK lookup, TMX symbol probe) or manually by the
 /// user pasting a CSE / TMX page URL.
@@ -450,6 +480,12 @@ model TickerListing {
   cseSlug     String?
   /// TMX symbol (usually same as ticker minus suffix).
   tmxSymbol   String?
+  /// SEDAR+ issuer number (numeric, e.g. "12345") extracted from a
+  /// pasted issuer profile URL. Required for cookie-authed SEDAR+ pulls.
+  sedarIssuerNo String?
+  /// Canonical SEDAR+ issuer-profile URL — what the user pasted, kept
+  /// for reference / re-resolution.
+  sedarProfileUrl String?
   resolvedAt  DateTime @default(now())
   updatedAt   DateTime @updatedAt
 

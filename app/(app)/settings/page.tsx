@@ -10,6 +10,7 @@ import { TaxProfileSection } from "@/components/tax-profile-section";
 import { PerformanceProfileSection } from "@/components/performance-profile-section";
 import { ContributionRoomSection } from "@/components/contribution-room-section";
 import { listContributionRooms } from "@/lib/canadian/contribution-room";
+import { ExternalCookiesSection } from "@/components/external-cookies-section";
 import { ChevronDownIcon } from "@/components/icons";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
@@ -28,7 +29,7 @@ export default async function SettingsPage() {
   const session = await auth.api.getSession({ headers: await headers() });
   if (!session) redirect("/sign-in");
 
-  const [brokerages, theme, preferences, contributionRooms] = await Promise.all([
+  const [brokerages, theme, preferences, contributionRooms, sedarSession] = await Promise.all([
     prisma.brokerage.findMany({
       where: { userId: session.user.id },
       orderBy: { createdAt: "asc" },
@@ -37,6 +38,11 @@ export default async function SettingsPage() {
     getThemeFromCookie(),
     getUserPreferences(session.user.id),
     listContributionRooms(session.user.id),
+    prisma.externalCookieSession.findUnique({
+      where: {
+        userId_source: { userId: session.user.id, source: "SEDAR_PLUS" },
+      },
+    }),
   ]);
 
   const currentYear = new Date().getUTCFullYear();
@@ -107,6 +113,21 @@ export default async function SettingsPage() {
             defaultOpen
           >
             <PerformanceProfileSection initial={preferences.performanceProfile} />
+          </Section>
+
+          <Section
+            title="External data sessions"
+            description="Cookie-based access to data sources that gate behind bot management (SEDAR+ today; potentially Canadian Insider later). One-time captcha + cookie copy lets the AI assistant pull filings autonomously."
+          >
+            <ExternalCookiesSection
+              sedarSession={{
+                source: "SEDAR_PLUS",
+                hasCookies: sedarSession != null,
+                userAgent: sedarSession?.userAgent ?? null,
+                notes: sedarSession?.notes ?? null,
+                updatedAt: sedarSession?.updatedAt ?? null,
+              }}
+            />
           </Section>
 
           <Section
