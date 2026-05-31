@@ -6,16 +6,69 @@ import { useToast } from "@/components/toast-provider";
 import { RULE_DESCRIPTION, RULE_LABEL, SCOPE_LABEL } from "@/lib/signals/types";
 import type { AlertRule, AlertScope } from "@/generated/prisma";
 
-const RULES: { value: AlertRule; defaultThreshold: number; thresholdHint: string }[] = [
-  { value: "PRICE_MOVE", defaultThreshold: 5, thresholdHint: "Day-change percent" },
-  { value: "DRAWDOWN", defaultThreshold: 10, thresholdHint: "Drop from avg cost" },
-  { value: "CONCENTRATION", defaultThreshold: 25, thresholdHint: "Position weight %" },
+type RuleMeta = {
+  value: AlertRule;
+  paramKind: "thresholdPct" | "multipleX" | "none";
+  defaultParam?: number;
+  paramLabel?: string;
+  paramHelp?: string;
+};
+
+const RULES: RuleMeta[] = [
+  {
+    value: "PRICE_MOVE",
+    paramKind: "thresholdPct",
+    defaultParam: 5,
+    paramLabel: "Day-change %",
+    paramHelp: "Fires when |day change| crosses this percent.",
+  },
+  {
+    value: "DRAWDOWN",
+    paramKind: "thresholdPct",
+    defaultParam: 10,
+    paramLabel: "Drawdown %",
+    paramHelp: "Fires when current price is at least this far below avg cost.",
+  },
+  {
+    value: "CONCENTRATION",
+    paramKind: "thresholdPct",
+    defaultParam: 25,
+    paramLabel: "Position weight %",
+    paramHelp: "Fires when a single position grows past this share of total portfolio.",
+  },
+  {
+    value: "MA_CROSS_50",
+    paramKind: "none",
+    paramHelp: "Fires when daily close crosses the 50-day simple moving average.",
+  },
+  {
+    value: "MA_CROSS_200",
+    paramKind: "none",
+    paramHelp: "Fires when daily close crosses the 200-day simple moving average.",
+  },
+  {
+    value: "VOLUME_SPIKE",
+    paramKind: "multipleX",
+    defaultParam: 3,
+    paramLabel: "Multiple of 30-day avg volume",
+    paramHelp: "Fires when today's volume exceeds N× the trailing 30-day average.",
+  },
+  {
+    value: "NEWS_MATERIAL",
+    paramKind: "none",
+    paramHelp:
+      "Fires when AI classifies a fresh headline as MATERIAL or CRITICAL. Requires the News-classification preference to be on.",
+  },
 ];
 
 const SCOPE_FOR_RULE: Record<AlertRule, AlertScope[]> = {
   PRICE_MOVE: ["HOLDING", "TICKER"],
   DRAWDOWN: ["HOLDING", "TICKER"],
   CONCENTRATION: ["PORTFOLIO"],
+  MA_CROSS_50: ["HOLDING", "TICKER"],
+  MA_CROSS_200: ["HOLDING", "TICKER"],
+  VOLUME_SPIKE: ["HOLDING", "TICKER"],
+  NEWS_MATERIAL: ["HOLDING", "TICKER"],
 };
 
 const inputClass =
@@ -32,8 +85,8 @@ export function AlertRuleForm({
   const [rule, setRule] = useState<AlertRule>("PRICE_MOVE");
   const [scope, setScope] = useState<AlertScope>("HOLDING");
   const [ticker, setTicker] = useState("");
-  const [thresholdPct, setThresholdPct] = useState<string>(
-    String(RULES.find((r) => r.value === "PRICE_MOVE")!.defaultThreshold),
+  const [threshold, setThreshold] = useState<string>(
+    String(RULES.find((r) => r.value === "PRICE_MOVE")!.defaultParam ?? ""),
   );
   const [pending, startTransition] = useTransition();
 
@@ -44,7 +97,8 @@ export function AlertRuleForm({
     setRule(next);
     const allowed = SCOPE_FOR_RULE[next];
     if (!allowed.includes(scope)) setScope(allowed[0]);
-    setThresholdPct(String(RULES.find((r) => r.value === next)!.defaultThreshold));
+    const meta = RULES.find((r) => r.value === next)!;
+    setThreshold(meta.defaultParam != null ? String(meta.defaultParam) : "");
   }
 
   function onSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -52,6 +106,14 @@ export function AlertRuleForm({
     const fd = new FormData(e.currentTarget);
     fd.set("rule", rule);
     fd.set("scope", scope);
+
+    if (ruleMeta.paramKind === "none") {
+      // Send a benign placeholder; server stores params freely as JSON
+      fd.set("thresholdPct", "0");
+    } else {
+      fd.set("thresholdPct", threshold);
+    }
+
     startTransition(async () => {
       const result = await createAlertAction(fd);
       if (result.ok) {
@@ -61,7 +123,7 @@ export function AlertRuleForm({
           variant: "success",
         });
         setTicker("");
-        setThresholdPct(String(ruleMeta.defaultThreshold));
+        setThreshold(ruleMeta.defaultParam != null ? String(ruleMeta.defaultParam) : "");
         onSaved?.();
       } else {
         toast({ title: "Couldn't save", description: result.error, variant: "error" });
@@ -76,9 +138,8 @@ export function AlertRuleForm({
     >
       <h3 className="mb-4 text-[16px] font-semibold">New alert</h3>
 
-      {/* Rule type */}
       <Field label="Rule">
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
           {RULES.map((r) => {
             const active = r.value === rule;
             return (
@@ -100,7 +161,6 @@ export function AlertRuleForm({
         </div>
       </Field>
 
-      {/* Scope */}
       <Field label="Applies to">
         <div className="flex flex-wrap gap-2">
           {allowedScopes.map((s) => {
@@ -146,34 +206,51 @@ export function AlertRuleForm({
         </Field>
       ) : null}
 
-      <Field
-        label={ruleMeta.thresholdHint}
-        help={
-          rule === "PRICE_MOVE"
-            ? "Fires when the absolute day change crosses this percent (either direction)."
-            : rule === "DRAWDOWN"
-              ? "Fires when current price is at least this percent below avg cost."
-              : "Fires when any position grows past this percent of total portfolio."
-        }
-      >
-        <div className="relative">
-          <input
-            name="thresholdPct"
-            type="number"
-            inputMode="decimal"
-            step="any"
-            required
-            min="0"
-            max="1000"
-            value={thresholdPct}
-            onChange={(e) => setThresholdPct(e.target.value)}
-            className={inputClass}
-          />
-          <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted">
-            %
-          </span>
-        </div>
-      </Field>
+      {ruleMeta.paramKind === "thresholdPct" ? (
+        <Field label={ruleMeta.paramLabel ?? "Threshold"} help={ruleMeta.paramHelp}>
+          <div className="relative">
+            <input
+              type="number"
+              inputMode="decimal"
+              step="any"
+              required
+              min="0"
+              max="1000"
+              value={threshold}
+              onChange={(e) => setThreshold(e.target.value)}
+              className={inputClass}
+            />
+            <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted">
+              %
+            </span>
+          </div>
+        </Field>
+      ) : ruleMeta.paramKind === "multipleX" ? (
+        <Field label={ruleMeta.paramLabel ?? "Multiple"} help={ruleMeta.paramHelp}>
+          <div className="relative">
+            <input
+              type="number"
+              inputMode="decimal"
+              step="any"
+              required
+              min="1"
+              max="100"
+              value={threshold}
+              onChange={(e) => setThreshold(e.target.value)}
+              className={inputClass}
+            />
+            <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted">
+              ×
+            </span>
+          </div>
+        </Field>
+      ) : (
+        <Field label="Configuration" help={ruleMeta.paramHelp}>
+          <div className="rounded-[10px] border border-border bg-bg px-3 py-2.5 text-sm text-muted">
+            No threshold needed.
+          </div>
+        </Field>
+      )}
 
       <Field label="Notify by">
         <label className="flex items-center gap-2 text-sm text-soft">

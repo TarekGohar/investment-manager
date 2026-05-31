@@ -1,18 +1,21 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
 import { getEnrichedPortfolio } from "@/lib/portfolio/queries";
-import { getQuotes } from "@/lib/marketdata";
-import { EVALUATORS } from "./rules";
+import { getCandles, getQuotes } from "@/lib/marketdata";
+import { sendAlertDigest } from "@/lib/mailgun";
+import { getUserPreferences } from "@/lib/preferences";
+import { COOLDOWN_MS_BY_RULE, EVALUATORS } from "./rules";
 import type { AlertConfig, FiredEvent } from "./types";
-import type { Alert, AlertRule, AlertScope, Prisma } from "@/generated/prisma";
-
-const COOLDOWN_MS = 24 * 60 * 60 * 1000; // 24h per (alert, ticker)
+import type { Alert, AlertRule, AlertScope, Candle, Prisma } from "@/generated/prisma";
+import type { Candle as MarketCandle } from "@/lib/marketdata";
 
 type EvaluateResult = {
   evaluated: number;
   fired: number;
   events: FiredEvent[];
 };
+
+const RULES_NEEDING_CANDLES = new Set(["MA_CROSS_50", "MA_CROSS_200", "VOLUME_SPIKE"]);
 
 /** Run all enabled alerts for a single user. Persists fired events. */
 export async function evaluateUserAlerts(userId: string): Promise<EvaluateResult> {
@@ -22,29 +25,49 @@ export async function evaluateUserAlerts(userId: string): Promise<EvaluateResult
   if (enabled.length === 0) return { evaluated: 0, fired: 0, events: [] };
 
   const portfolio = await getEnrichedPortfolio(userId);
-  // Make sure we have quotes for every held ticker + every TICKER-scoped alert
+
+  // Collect every ticker referenced by enabled alerts
   const tickerSet = new Set<string>(portfolio.holdings.map((h) => h.ticker));
   for (const a of enabled) {
     if (a.scope === "TICKER" && a.ticker) tickerSet.add(a.ticker);
   }
-  const quotes = await getQuotes(Array.from(tickerSet));
+  const tickerList = Array.from(tickerSet);
 
-  const ctx = { portfolio, quotes };
+  // Quotes for every relevant ticker (warmed by /api/cron/refresh-quotes)
+  const quotes = await getQuotes(tickerList);
 
+  // Candles only when a rule actually needs them
+  const needsCandles = enabled.some((a) => RULES_NEEDING_CANDLES.has(a.rule));
+  const candles = new Map<string, MarketCandle[]>();
+  if (needsCandles && tickerList.length > 0) {
+    const results = await Promise.all(
+      tickerList.map(async (t) => [t, await getCandles(t, 210)] as const),
+    );
+    for (const [t, bars] of results) if (bars.length > 0) candles.set(t, bars);
+  }
+
+  const ctx = { portfolio, quotes, candles };
+
+  // Evaluate (some are async, e.g. NEWS_MATERIAL)
   const candidateEvents: FiredEvent[] = [];
   for (const row of enabled) {
     const alert = rowToConfig(row);
     const evaluator = EVALUATORS[row.rule];
     if (!evaluator) continue;
-    candidateEvents.push(...evaluator(alert, ctx));
+    try {
+      const result = await evaluator(alert, ctx);
+      candidateEvents.push(...result);
+    } catch (err) {
+      console.error(`[signals] ${row.rule} eval failed for alert ${alert.id}:`, err);
+    }
   }
 
   if (candidateEvents.length === 0) {
     return { evaluated: enabled.length, fired: 0, events: [] };
   }
 
-  // Filter against cooldown — don't re-fire same (alert, ticker) within window
-  const fresh = await dedupeAgainstRecent(candidateEvents);
+  // Per-rule cooldown dedup, plus NEWS_MATERIAL handles its own newsId dedup internally
+  const fresh = await dedupeAgainstRecent(candidateEvents, enabled);
   if (fresh.length === 0) {
     return { evaluated: enabled.length, fired: 0, events: [] };
   }
@@ -59,14 +82,50 @@ export async function evaluateUserAlerts(userId: string): Promise<EvaluateResult
     })),
   });
 
+  // Email digest (only when user has it enabled globally + alert has EMAIL channel)
+  try {
+    const prefs = await getUserPreferences(userId);
+    if (prefs.emailDigestEnabled) {
+      const emailAlertIds = new Set(
+        enabled
+          .filter((a) => {
+            const channels = Array.isArray(a.channels) ? (a.channels as unknown as string[]) : [];
+            return channels.includes("EMAIL");
+          })
+          .map((a) => a.id),
+      );
+      const emailEvents = fresh.filter((e) => emailAlertIds.has(e.alertId));
+      if (emailEvents.length > 0) {
+        const user = await prisma.user.findUnique({
+          where: { id: userId },
+          select: { email: true },
+        });
+        if (user?.email) {
+          await sendAlertDigest({
+            email: user.email,
+            events: emailEvents.map((e) => ({
+              ticker: e.ticker,
+              message: e.message,
+              firedAt: new Date(),
+            })),
+          });
+        }
+      }
+    }
+  } catch (err) {
+    console.error("[signals] alert digest send failed:", err);
+  }
+
   return { evaluated: enabled.length, fired: fresh.length, events: fresh };
 }
 
-async function dedupeAgainstRecent(candidates: FiredEvent[]): Promise<FiredEvent[]> {
-  const cutoff = new Date(Date.now() - COOLDOWN_MS);
-  const out: FiredEvent[] = [];
+async function dedupeAgainstRecent(
+  candidates: FiredEvent[],
+  enabledAlerts: Alert[],
+): Promise<FiredEvent[]> {
+  const ruleByAlertId = new Map<string, string>();
+  for (const a of enabledAlerts) ruleByAlertId.set(a.id, a.rule);
 
-  // Group lookups by alert to minimize round trips
   const byAlert = new Map<string, FiredEvent[]>();
   for (const c of candidates) {
     const arr = byAlert.get(c.alertId) ?? [];
@@ -74,7 +133,16 @@ async function dedupeAgainstRecent(candidates: FiredEvent[]): Promise<FiredEvent
     byAlert.set(c.alertId, arr);
   }
 
+  const out: FiredEvent[] = [];
   for (const [alertId, evs] of byAlert) {
+    const rule = ruleByAlertId.get(alertId);
+    const cooldown = rule ? (COOLDOWN_MS_BY_RULE[rule] ?? 24 * 3_600_000) : 24 * 3_600_000;
+    if (cooldown <= 0) {
+      // Rule handles its own dedup — pass through
+      out.push(...evs);
+      continue;
+    }
+    const cutoff = new Date(Date.now() - cooldown);
     const recent = await prisma.alertEvent.findMany({
       where: { alertId, firedAt: { gte: cutoff } },
       select: { ticker: true },
@@ -83,11 +151,9 @@ async function dedupeAgainstRecent(candidates: FiredEvent[]): Promise<FiredEvent
     for (const ev of evs) {
       if (seenTickers.has(ev.ticker)) continue;
       out.push(ev);
-      // Prevent dupes within this batch too
       seenTickers.add(ev.ticker);
     }
   }
-
   return out;
 }
 
@@ -100,6 +166,10 @@ function rowToConfig(a: Alert): AlertConfig {
     ticker: a.ticker,
     params: (a.params as Record<string, unknown>) ?? {},
     enabled: a.enabled,
-    channels: Array.isArray(a.channels) ? (a.channels as string[]).filter((c) => c === "IN_APP" || c === "EMAIL") as ("IN_APP" | "EMAIL")[] : ["IN_APP"],
+    channels: Array.isArray(a.channels)
+      ? ((a.channels as unknown as string[]).filter(
+          (c) => c === "IN_APP" || c === "EMAIL",
+        ) as ("IN_APP" | "EMAIL")[])
+      : ["IN_APP"],
   };
 }

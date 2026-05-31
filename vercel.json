@@ -5,8 +5,20 @@
       "schedule": "*/30 * * * *"
     },
     {
+      "path": "/api/cron/classify-news",
+      "schedule": "15 * * * *"
+    },
+    {
       "path": "/api/cron/run-alerts",
       "schedule": "2,32 * * * *"
+    },
+    {
+      "path": "/api/cron/daily-review",
+      "schedule": "15 21 * * 1-5"
+    },
+    {
+      "path": "/api/cron/weekly-review",
+      "schedule": "0 13 * * 0"
     }
   ]
 }

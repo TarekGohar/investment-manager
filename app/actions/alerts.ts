@@ -7,7 +7,7 @@ import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { evaluateUserAlerts } from "@/lib/signals/evaluate";
-import { AlertRule, AlertScope } from "@/generated/prisma";
+import { AlertRule, AlertScope, type Prisma } from "@/generated/prisma";
 
 type ActionResult<T = void> =
   | (T extends void ? { ok: true } : { ok: true; data: T })
@@ -15,7 +15,15 @@ type ActionResult<T = void> =
 
 const Schema = z
   .object({
-    rule: z.enum(["PRICE_MOVE", "DRAWDOWN", "CONCENTRATION"]),
+    rule: z.enum([
+      "PRICE_MOVE",
+      "DRAWDOWN",
+      "CONCENTRATION",
+      "MA_CROSS_50",
+      "MA_CROSS_200",
+      "VOLUME_SPIKE",
+      "NEWS_MATERIAL",
+    ]),
     scope: z.enum(["PORTFOLIO", "HOLDING", "TICKER"]),
     ticker: z
       .string()
@@ -23,7 +31,7 @@ const Schema = z
       .toUpperCase()
       .optional()
       .transform((v) => (v ? v : null)),
-    thresholdPct: z.coerce.number().positive().max(1000),
+    thresholdPct: z.coerce.number().nonnegative().max(1000),
     emailChannel: z.coerce.boolean().default(false),
   })
   .superRefine((data, ctx) => {
@@ -41,11 +49,30 @@ const Schema = z
         message: "Concentration alerts only support the portfolio scope.",
       });
     }
-    if (data.rule === "DRAWDOWN" && data.scope === "PORTFOLIO") {
+    if (
+      (data.rule === "DRAWDOWN" ||
+        data.rule === "MA_CROSS_50" ||
+        data.rule === "MA_CROSS_200" ||
+        data.rule === "VOLUME_SPIKE" ||
+        data.rule === "NEWS_MATERIAL") &&
+      data.scope === "PORTFOLIO"
+    ) {
       ctx.addIssue({
         code: "custom",
         path: ["scope"],
-        message: "Drawdown alerts must be scoped to a ticker or all holdings.",
+        message: "This rule must be scoped to a ticker or all holdings.",
+      });
+    }
+    const needsThreshold =
+      data.rule === "PRICE_MOVE" ||
+      data.rule === "DRAWDOWN" ||
+      data.rule === "CONCENTRATION" ||
+      data.rule === "VOLUME_SPIKE";
+    if (needsThreshold && data.thresholdPct <= 0) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["thresholdPct"],
+        message: "Threshold must be greater than 0.",
       });
     }
   });
@@ -66,13 +93,25 @@ export async function createAlertAction(formData: FormData): Promise<ActionResul
   }
   const data = parsed.data;
 
+  let params: Record<string, unknown> = {};
+  if (
+    data.rule === "PRICE_MOVE" ||
+    data.rule === "DRAWDOWN" ||
+    data.rule === "CONCENTRATION"
+  ) {
+    params = { thresholdPct: data.thresholdPct };
+  } else if (data.rule === "VOLUME_SPIKE") {
+    params = { multipleX: data.thresholdPct };
+  }
+  // MA_CROSS_50, MA_CROSS_200, NEWS_MATERIAL: no params
+
   await prisma.alert.create({
     data: {
       userId: session.user.id,
       rule: data.rule as AlertRule,
       scope: data.scope as AlertScope,
       ticker: data.ticker,
-      params: { thresholdPct: data.thresholdPct },
+      params: params as Prisma.InputJsonValue,
       channels: data.emailChannel ? ["IN_APP", "EMAIL"] : ["IN_APP"],
     },
   });

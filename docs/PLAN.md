@@ -2,7 +2,7 @@
 
 > Living source of truth. Update when a decision changes; don't let this drift from reality.
 
-**Last touched:** 2026-05-31 · **Phase:** 5 done; ready for 6 (scheduled AI reviews) or more polish
+**Last touched:** 2026-05-31 · **Phase:** 6 done; app feature-complete for v1
 
 ---
 
@@ -245,9 +245,9 @@ Each cron route checks `process.env.CRON_SECRET` against the `authorization` hea
 | 2 — Real transactions | ✅ Done | Brokerage + Transaction models, transaction-entry form, FIFO holdings derivation, rewire pages to real data |
 | 3 — Market data | ✅ Done | Quote/News/Fundamentals/Candle tables, TTL-aware cache layer, Finnhub adapter for quote/news/fundamentals, Yahoo Finance for candles, dashboard + portfolio + position pages all consume live data with graceful fallback |
 | 4 — AI chat | ✅ Done | Provider-neutral `AiProvider` interface (`lib/ai/types.ts`), OpenAI adapter, 6 tools (quote/news/fundamentals/portfolio/position/transactions), PM persona system prompt, SSE-streaming `/api/ai/chat` route, full chat UI with tool-use chips, conversation persistence, light/dark themed |
-| 5 — Alerts engine | ✅ Done | Alert + AlertEvent schema, signal engine (PRICE_MOVE / DRAWDOWN / CONCENTRATION), Vercel Cron config (`vercel.json`), `/api/cron/refresh-quotes` + `/api/cron/run-alerts` with `CRON_SECRET`, /alerts page with rule list/create form/event feed, real notification badge in topbar, "Run now" manual trigger |
-| 6 — Scheduled AI | ⏳ | EOD review (Sonnet), weekly deep-dive (Opus), news severity classifier |
-| 7 — Polish | ⏳ | Watchlist, Markets page, Settings, mobile responsive pass |
+| 5 — Alerts engine | ✅ Done | Alert + AlertEvent schema, signal engine (**PRICE_MOVE / DRAWDOWN / CONCENTRATION / MA_CROSS_50 / MA_CROSS_200 / VOLUME_SPIKE / NEWS_MATERIAL**), Vercel Cron (5 jobs), /alerts page, notification badge, **Mailgun digest emails** for `EMAIL`-channel alerts, **AI news classifier** (INFO/MATERIAL/CRITICAL via hourly cron, gated by user preference) |
+| 6 — Scheduled AI | ✅ Done | AIAnalysis schema, daily review (21:15 UTC Mon–Fri) + weekly review (Sunday 13:00 UTC) crons, dashboard PM's read card surfaces latest, "Regenerate" manual trigger |
+| 7 — Polish | ✅ Done | Watchlist, Markets, Settings (collapsible + Mailgun status + test email + **per-user preference toggles**), mobile responsive pass, toasts, transaction edit, brokerage management, conversation list, loading states, allocation donut, stop-generating, search bar, **SETUP.md** |
 
 ---
 

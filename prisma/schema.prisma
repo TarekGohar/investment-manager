@@ -18,6 +18,8 @@ model User {
   emailVerified Boolean   @default(false)
   name          String?
   image         String?
+  // User-facing toggles — shape defined in lib/preferences.ts
+  preferences   Json?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
@@ -29,6 +31,7 @@ model User {
   aiConversations AIConversation[]
   alerts          Alert[]
   alertEvents     AlertEvent[]
+  aiAnalyses      AIAnalysis[]
 
   @@map("user")
 }
@@ -154,16 +157,20 @@ model Quote {
 }
 
 model NewsItem {
-  id          String   @id
-  ticker      String
-  headline    String
-  summary     String?
-  url         String
-  source      String
-  publishedAt DateTime
-  fetchedAt   DateTime @default(now())
+  id           String        @id
+  ticker       String
+  headline     String
+  summary      String?
+  url          String
+  source       String
+  publishedAt  DateTime
+  // AI-classified materiality. Null = not yet classified.
+  aiSeverity   NewsSeverity?
+  classifiedAt DateTime?
+  fetchedAt    DateTime      @default(now())
 
   @@index([ticker, publishedAt])
+  @@index([ticker, aiSeverity])
   @@map("news_item")
 }
 
@@ -206,6 +213,16 @@ enum AlertRule {
   PRICE_MOVE
   DRAWDOWN
   CONCENTRATION
+  MA_CROSS_50
+  MA_CROSS_200
+  VOLUME_SPIKE
+  NEWS_MATERIAL
+}
+
+enum NewsSeverity {
+  INFO
+  MATERIAL
+  CRITICAL
 }
 
 enum AlertScope {
@@ -308,4 +325,32 @@ model AIMessage {
 
   @@index([conversationId, createdAt])
   @@map("ai_message")
+}
+
+enum AnalysisKind {
+  EOD_DAILY
+  WEEKLY
+  ON_ALERT
+}
+
+model AIAnalysis {
+  id           String       @id @default(cuid())
+  userId       String
+  kind         AnalysisKind
+  ticker       String?
+  title        String?
+  // Markdown body
+  body         String
+  // Snapshot of the metrics the review was written against
+  metrics      Json?
+  model        String?
+  inputTokens  Int?
+  outputTokens Int?
+  generatedAt  DateTime     @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, kind, generatedAt(sort: Desc)])
+  @@index([userId, generatedAt(sort: Desc)])
+  @@map("ai_analysis")
 }

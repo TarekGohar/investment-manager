@@ -5,6 +5,8 @@ import { Topbar } from "@/components/topbar";
 import { PriceChart } from "@/components/charts/price-chart";
 import { TickerBadge } from "@/components/ticker-badge";
 import { AllocationDonut } from "@/components/allocation-donut";
+import { PMReadCard } from "@/components/pm-read-card";
+import { getLatestAnalysis } from "@/lib/ai/reviews";
 import {
   ArrowDownRightIcon,
   ArrowUpRightIcon,
@@ -25,7 +27,10 @@ export default async function DashboardPage() {
   const session = await auth.api.getSession({ headers: await headers() });
   if (!session) redirect("/sign-in");
 
-  const portfolio = await getEnrichedPortfolio(session.user.id);
+  const [portfolio, latestReview] = await Promise.all([
+    getEnrichedPortfolio(session.user.id),
+    getLatestAnalysis(session.user.id, "EOD_DAILY"),
+  ]);
 
   if (portfolio.holdings.length === 0) {
     return (
@@ -201,13 +206,7 @@ export default async function DashboardPage() {
 
         {/* Right rail */}
         <aside className="w-full lg:w-[400px] lg:shrink-0">
-          <section className="mb-[26px] rounded-card border border-border bg-panel px-6 py-[22px]">
-            <h3 className="mb-3 text-[16px] font-semibold">PM&apos;s read</h3>
-            <p className="text-sm leading-relaxed text-muted">
-              AI portfolio commentary lands here once Phase 4 ships. It&apos;ll read your live
-              positions, cost basis, and incoming news — and write a daily and weekly take.
-            </p>
-          </section>
+          <PMReadCard initialReview={latestReview} hasHoldings={portfolio.holdings.length > 0} />
 
           <section className="rounded-[22px] border border-border bg-panel p-[22px]">
             <h3 className="mb-3 text-[16px] font-semibold">Add a transaction</h3>
