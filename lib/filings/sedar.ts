@@ -21,12 +21,14 @@ import type { FilingType } from "@/generated/prisma";
  */
 
 /**
- * SEDAR+ has no stable public deep-link for issuer search — the search UI
- * is stateful (form POSTs against a session) and synthetic URLs trip the
- * abuse-detection system. We just point users at the homepage and let
- * them paste the ticker into the search box themselves.
+ * SEDAR+ has no stable public deep-link for issuer search AND its hosting
+ * (Radware ShieldSquare / validate.perfdrive.com) bounces cross-origin
+ * sessions to a bot challenge. Even the bare homepage URL fails when
+ * clicked from a third-party app because the user arrives without the
+ * right TLS / cookie fingerprint. We surface the hostname as plain text
+ * and ask the user to type it themselves.
  */
-const SEDAR_HOMEPAGE = "https://www.sedarplus.ca/landingpage/?language=en_CA";
+const SEDAR_HOMEPAGE = "sedarplus.ca";
 
 export type SedarFilingListItem = {
   externalId: string;

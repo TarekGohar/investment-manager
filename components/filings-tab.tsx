@@ -89,15 +89,13 @@ export function FilingsTab({
       <section className="rounded-card border border-border bg-panel">
         <div className="flex flex-wrap items-baseline justify-between gap-2 px-6 py-5">
           <h3 className="text-[16px] font-semibold">Filing history</h3>
-          <a
-            href={sedarUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-xs text-muted underline"
-            title="SEDAR+ has no stable deep-link search — opens the homepage; paste the ticker into their search."
-          >
-            Open SEDAR+ →
-          </a>
+          {!isUsListed ? (
+            <span className="text-xs text-muted">
+              Canadian-listed? Search{" "}
+              <span className="font-mono text-text">{sedarUrl}</span> manually
+              (their bot filter blocks cross-site links).
+            </span>
+          ) : null}
         </div>
         {filings.length === 0 ? (
           <div className="border-t border-border px-6 py-8 text-center text-sm text-muted">
