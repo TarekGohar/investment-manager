@@ -1,0 +1,311 @@
+// ─── Generator ─────────────────────────────────────────────────────────
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─── Better Auth ───────────────────────────────────────────────────────
+// These four models are required by Better Auth. Do not rename their
+// columns — Better Auth's runtime queries them by these exact names.
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  emailVerified Boolean   @default(false)
+  name          String?
+  image         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  sessions        Session[]
+  accounts        Account[]
+  brokerages      Brokerage[]
+  transactions    Transaction[]
+  watchlist       WatchlistItem[]
+  aiConversations AIConversation[]
+  alerts          Alert[]
+  alertEvents     AlertEvent[]
+
+  @@map("user")
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  expiresAt DateTime
+  token     String   @unique
+  ipAddress String?
+  userAgent String?
+  userId    String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("session")
+}
+
+model Account {
+  id                    String    @id @default(cuid())
+  accountId             String
+  providerId            String
+  userId                String
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("account")
+}
+
+model Verification {
+  id         String   @id @default(cuid())
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([identifier])
+  @@map("verification")
+}
+
+// ─── Domain: portfolio + transactions ──────────────────────────────────
+
+enum TransactionKind {
+  BUY
+  SELL
+  DIVIDEND
+  SPLIT
+  TRANSFER_IN
+  TRANSFER_OUT
+}
+
+model Brokerage {
+  id        String   @id @default(cuid())
+  userId    String
+  name      String
+  currency  String   @default("USD")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions Transaction[]
+
+  @@unique([userId, name])
+  @@index([userId])
+  @@map("brokerage")
+}
+
+model Transaction {
+  id          String          @id @default(cuid())
+  userId      String
+  brokerageId String
+  ticker      String
+  kind        TransactionKind
+  // For BUY/SELL: shares. For DIVIDEND: 1 (price holds the $ amount). For SPLIT: 0.
+  quantity    Decimal         @db.Decimal(18, 6)
+  // For BUY/SELL: per-share. For DIVIDEND: total dividend received. For SPLIT: 0.
+  price       Decimal         @db.Decimal(18, 4)
+  fees        Decimal         @default(0) @db.Decimal(18, 4)
+  occurredAt  DateTime
+  note        String?
+  // For SPLIT only: new shares per old share (e.g. 2 for a 2-for-1).
+  splitRatio  Decimal?        @db.Decimal(10, 4)
+  createdAt   DateTime        @default(now())
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  brokerage Brokerage @relation(fields: [brokerageId], references: [id], onDelete: Cascade)
+
+  @@index([userId, ticker, occurredAt])
+  @@index([userId, occurredAt])
+  @@map("transaction")
+}
+
+// ─── Market data cache (Phase 3) ──────────────────────────────────────
+// Lazy-populated by lib/marketdata. TTLs enforced in code, not the DB.
+
+model Quote {
+  ticker    String   @id
+  price     Decimal  @db.Decimal(18, 4)
+  change    Decimal  @db.Decimal(18, 4)
+  changePct Decimal  @db.Decimal(10, 4)
+  prevClose Decimal  @db.Decimal(18, 4)
+  open      Decimal? @db.Decimal(18, 4)
+  high      Decimal? @db.Decimal(18, 4)
+  low       Decimal? @db.Decimal(18, 4)
+  asOf      DateTime
+  source    String   @default("finnhub")
+  fetchedAt DateTime @default(now())
+
+  @@map("quote")
+}
+
+model NewsItem {
+  id          String   @id
+  ticker      String
+  headline    String
+  summary     String?
+  url         String
+  source      String
+  publishedAt DateTime
+  fetchedAt   DateTime @default(now())
+
+  @@index([ticker, publishedAt])
+  @@map("news_item")
+}
+
+model Fundamentals {
+  ticker        String   @id
+  companyName   String?
+  industry      String?
+  exchange      String?
+  marketCap     Decimal? @db.Decimal(20, 2)
+  peTtm         Decimal? @db.Decimal(10, 2)
+  forwardPe     Decimal? @db.Decimal(10, 2)
+  dividendYield Decimal? @db.Decimal(8, 6)
+  beta          Decimal? @db.Decimal(8, 4)
+  fiftyTwoHigh  Decimal? @db.Decimal(18, 4)
+  fiftyTwoLow   Decimal? @db.Decimal(18, 4)
+  logo          String?
+  weburl        String?
+  fetchedAt     DateTime @default(now())
+
+  @@map("fundamentals")
+}
+
+model Candle {
+  ticker String
+  ts     DateTime
+  open   Decimal  @db.Decimal(18, 4)
+  high   Decimal  @db.Decimal(18, 4)
+  low    Decimal  @db.Decimal(18, 4)
+  close  Decimal  @db.Decimal(18, 4)
+  volume BigInt
+
+  @@id([ticker, ts])
+  @@index([ticker, ts])
+  @@map("candle")
+}
+
+// ─── Alerts ────────────────────────────────────────────────────────────
+
+enum AlertRule {
+  PRICE_MOVE
+  DRAWDOWN
+  CONCENTRATION
+}
+
+enum AlertScope {
+  PORTFOLIO
+  HOLDING
+  TICKER
+}
+
+model Alert {
+  id        String     @id @default(cuid())
+  userId    String
+  rule      AlertRule
+  scope     AlertScope
+  // When scope = TICKER, the specific ticker. Null otherwise.
+  ticker    String?
+  // Rule-specific parameters as JSON, e.g. { "thresholdPct": 5 }
+  params    Json
+  enabled   Boolean    @default(true)
+  // Notification channels, e.g. ["IN_APP"] or ["IN_APP", "EMAIL"]
+  channels  Json       @default("[\"IN_APP\"]")
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  user   User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  events AlertEvent[]
+
+  @@index([userId, enabled])
+  @@map("alert")
+}
+
+model AlertEvent {
+  id      String   @id @default(cuid())
+  alertId String
+  userId  String
+  ticker  String?
+  firedAt DateTime @default(now())
+  // Human-readable summary, e.g. "AAPL up 5.2% today"
+  message String
+  // Snapshot of values at firing
+  data    Json
+  read    Boolean  @default(false)
+
+  alert Alert @relation(fields: [alertId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, firedAt(sort: Desc)])
+  @@index([userId, read])
+  @@index([alertId, ticker, firedAt(sort: Desc)])
+  @@map("alert_event")
+}
+
+// ─── Watchlist ─────────────────────────────────────────────────────────
+
+model WatchlistItem {
+  id      String   @id @default(cuid())
+  userId  String
+  ticker  String
+  note    String?
+  addedAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, ticker])
+  @@index([userId])
+  @@map("watchlist_item")
+}
+
+// ─── AI chat ───────────────────────────────────────────────────────────
+
+model AIConversation {
+  id        String   @id @default(cuid())
+  userId    String
+  scope     String?  // "portfolio" or a ticker symbol
+  title     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user     User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages AIMessage[]
+
+  @@index([userId, updatedAt])
+  @@map("ai_conversation")
+}
+
+model AIMessage {
+  id             String   @id @default(cuid())
+  conversationId String
+  // "user" | "assistant" | "tool"
+  role           String
+  // Structured content: { text: string, toolCalls?: [...], toolResults?: [...] }
+  // For user messages: { text }. For assistant: { text, toolCalls? }. For tool: { toolCallId, name, result }.
+  content        Json
+  // Token usage on assistant messages (for cost telemetry)
+  inputTokens    Int?
+  outputTokens   Int?
+  model          String?
+  createdAt      DateTime @default(now())
+
+  conversation AIConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
+  @@map("ai_message")
+}

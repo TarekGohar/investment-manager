@@ -1,0 +1,114 @@
+@import "tailwindcss";
+
+/* ─── Theme: dark (default) ─────────────────────────────────────── */
+@theme {
+  --color-bg: #0a0b0d;
+  --color-panel: #121417;
+  --color-panel-2: #16181c;
+  --color-pill: #1f2226;
+  --color-hover: #1c1f24;
+
+  --color-border: #23262b;
+  --color-border-2: #2a2d33;
+
+  --color-text: #ffffff;
+  --color-muted: #8a919e;
+  --color-muted-2: #5b616e;
+  --color-soft: #c2c7d0;
+
+  --color-brand: #3773f5;
+  --color-brand-2: #578bfa;
+  --color-brand-3: #6f6cf6;
+  --color-success: #27ad75;
+  --color-success-2: #05b169;
+  --color-danger: #e8484b;
+  --color-warning: #f7931a;
+  --color-grid: #3a3f47;
+}
+
+/* ─── Theme: light overrides ───────────────────────────────────── */
+[data-theme="light"] {
+  --color-bg: #ffffff;
+  --color-panel: #f6f8fa;
+  --color-panel-2: #ebeef1;
+  --color-pill: #eceef2;
+  --color-hover: #f0f2f5;
+
+  --color-border: #e5e7eb;
+  --color-border-2: #d4d7dc;
+
+  --color-text: #0a0b0d;
+  --color-muted: #5b616e;
+  --color-muted-2: #8a919e;
+  --color-soft: #3c4250;
+
+  --color-brand: #1e5fef;
+  --color-brand-2: #3773f5;
+  --color-brand-3: #6f6cf6;
+  --color-success: #05b169;
+  --color-success-2: #05b169;
+  --color-danger: #cf202f;
+  --color-warning: #b86a00;
+  --color-grid: #d4d7dc;
+}
+
+/* ─── Non-themeable design tokens ──────────────────────────────── */
+@theme inline {
+  --font-sans: var(--font-geist-sans), "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, monospace;
+
+  --radius-card: 16px;
+  --radius-pill: 22px;
+  --radius-cta: 28px;
+}
+
+html,
+body {
+  background: var(--color-bg);
+  color: var(--color-text);
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  font-family: var(--font-sans);
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-border-2);
+  border-radius: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type="number"] {
+  -moz-appearance: textfield;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--color-brand) 35%, transparent);
+  color: var(--color-text);
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-brand);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* Smoother color transitions between themes (but skip transforms/opacity to keep hover snappy) */
+html {
+  color-scheme: dark;
+}
+[data-theme="light"] {
+  color-scheme: light;
+}

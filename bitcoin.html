@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bitcoin · Coinbase</title>
+<style>
+  :root{
+    --bg:#0a0b0d;
+    --panel:#121417;
+    --panel-2:#16181c;
+    --border:#23262b;
+    --text:#ffffff;
+    --muted:#8a919e;
+    --muted-2:#5b616e;
+    --blue:#3773f5;
+    --blue-2:#578bfa;
+    --green:#27ad75;
+    --green-bright:#05b169;
+    --pill:#1f2226;
+    --radius:16px;
+    --sans:'Coinbase Sans','Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    background:var(--bg);
+    color:var(--text);
+    font-family:var(--sans);
+    -webkit-font-smoothing:antialiased;
+    display:flex;
+    min-height:100vh;
+  }
+  ::-webkit-scrollbar{width:10px;height:10px}
+  ::-webkit-scrollbar-thumb{background:#2a2d33;border-radius:8px}
+  a{color:var(--blue-2);text-decoration:none}
+  a:hover{text-decoration:underline}
+  button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit}
+
+  /* ---------- Sidebar ---------- */
+  .sidebar{
+    width:248px;
+    flex:0 0 248px;
+    background:var(--bg);
+    border-right:1px solid var(--border);
+    padding:22px 16px;
+    display:flex;
+    flex-direction:column;
+    position:sticky;
+    top:0;
+    height:100vh;
+  }
+  .logo{
+    width:34px;height:34px;border-radius:50%;
+    background:#fff;display:flex;align-items:center;justify-content:center;
+    margin:6px 6px 30px;
+  }
+  .logo svg{width:20px;height:20px}
+  .nav{display:flex;flex-direction:column;gap:4px;flex:1}
+  .nav a{
+    display:flex;align-items:center;gap:16px;
+    padding:11px 12px;border-radius:10px;
+    color:var(--text);font-size:15px;font-weight:600;
+    transition:background .15s;
+  }
+  .nav a:hover{background:var(--panel);text-decoration:none}
+  .nav a.active{background:var(--panel)}
+  .nav a svg{width:22px;height:22px;flex:0 0 22px;stroke:currentColor}
+  .nav-bottom{margin-top:auto}
+
+  /* ---------- Top bar ---------- */
+  .main{flex:1;min-width:0;display:flex;flex-direction:column}
+  .topbar{
+    height:72px;flex:0 0 72px;
+    border-bottom:1px solid var(--border);
+    display:flex;align-items:center;gap:18px;
+    padding:0 26px;
+    position:sticky;top:0;background:var(--bg);z-index:5;
+  }
+  .back-btn{
+    width:40px;height:40px;border-radius:50%;
+    background:var(--panel);display:flex;align-items:center;justify-content:center;
+  }
+  .back-btn:hover{background:var(--panel-2)}
+  .topbar h1{font-size:22px;font-weight:600}
+  .top-spacer{flex:1}
+  .search{
+    display:flex;align-items:center;gap:10px;
+    background:var(--panel);border-radius:24px;
+    padding:0 18px;height:44px;width:380px;
+    color:var(--muted);
+  }
+  .search svg{width:20px;height:20px;flex:0 0 20px}
+  .search input{
+    background:none;border:none;outline:none;color:var(--text);
+    font-size:15px;width:100%;font-family:inherit;
+  }
+  .search input::placeholder{color:var(--muted)}
+  .icon-btn{
+    width:40px;height:40px;border-radius:50%;
+    background:var(--panel);display:flex;align-items:center;justify-content:center;
+    position:relative;color:var(--text);
+  }
+  .icon-btn:hover{background:var(--panel-2)}
+  .icon-btn svg{width:20px;height:20px}
+  .badge{
+    position:absolute;top:-3px;right:-3px;
+    background:#e8484b;color:#fff;font-size:11px;font-weight:700;
+    min-width:18px;height:18px;border-radius:9px;
+    display:flex;align-items:center;justify-content:center;padding:0 5px;
+    border:2px solid var(--bg);
+  }
+  .avatar{
+    width:40px;height:40px;border-radius:50%;
+    background:#27c0e8;color:#06222b;font-weight:700;font-size:16px;
+    display:flex;align-items:center;justify-content:center;
+  }
+
+  /* ---------- Content ---------- */
+  .content{
+    flex:1;display:flex;gap:34px;
+    padding:30px 34px 60px;
+    align-items:flex-start;
+  }
+  .col-main{flex:1;min-width:0}
+  .col-side{flex:0 0 400px}
+
+  /* Price header */
+  .price-head{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:18px}
+  .price{font-size:42px;font-weight:600;letter-spacing:-.5px}
+  .change{display:flex;align-items:center;gap:6px;color:var(--green);font-size:16px;font-weight:600;margin-top:6px}
+  .star{
+    width:44px;height:44px;border-radius:50%;background:var(--panel);
+    display:flex;align-items:center;justify-content:center;color:var(--blue-2);
+  }
+  .star:hover{background:var(--panel-2)}
+
+  /* Chart */
+  .chart-wrap{position:relative;margin:8px 0 4px}
+  svg.chart{display:block;width:100%;height:260px;overflow:visible}
+  .ann{position:absolute;font-size:12px;color:var(--muted);font-weight:500;pointer-events:none}
+
+  /* Range tabs */
+  .ranges{display:flex;gap:6px;margin:14px 0 22px}
+  .ranges button{
+    padding:8px 16px;border-radius:20px;font-size:13px;font-weight:600;color:var(--muted);
+  }
+  .ranges button:hover{background:var(--panel)}
+  .ranges button.active{background:var(--panel);color:var(--text)}
+
+  /* Sub tabs */
+  .subtabs{display:flex;gap:26px;border-bottom:1px solid var(--border);margin-bottom:26px}
+  .subtabs button{
+    padding:0 0 14px;font-size:15px;font-weight:600;color:var(--muted);position:relative;
+  }
+  .subtabs button.active{color:var(--text)}
+  .subtabs button.active::after{
+    content:"";position:absolute;left:0;right:0;bottom:-1px;height:2px;background:var(--blue);border-radius:2px;
+  }
+
+  /* News card */
+  .card{
+    background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);
+    padding:22px 24px;margin-bottom:26px;
+  }
+  .card h3{font-size:16px;font-weight:600;margin-bottom:10px}
+  .ai-tag{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);margin-bottom:16px}
+  .ai-dot{width:8px;height:8px;border-radius:50%;background:linear-gradient(135deg,#3773f5,#9b5cf6)}
+  .card p{font-size:14px;line-height:1.65;color:#c2c7d0;margin-bottom:14px}
+  .sub{font-size:15px;font-weight:600;margin:18px 0 8px}
+  .readmore{
+    display:block;width:100%;text-align:center;
+    background:var(--panel-2);border:1px solid var(--border);border-radius:24px;
+    padding:13px;font-size:14px;font-weight:600;color:var(--text);margin-top:8px;
+  }
+  .readmore:hover{background:#1c1f24}
+  .about h2{font-size:20px;font-weight:600;margin-bottom:14px}
+  .about p{font-size:14px;line-height:1.7;color:#c2c7d0;margin-bottom:16px}
+
+  /* ---------- Buy panel ---------- */
+  .buy{
+    background:var(--panel);border:1px solid var(--border);border-radius:22px;
+    padding:22px;position:sticky;top:96px;
+  }
+  .seg{
+    display:flex;background:var(--pill);border-radius:24px;padding:5px;margin-bottom:30px;
+  }
+  .seg button{
+    flex:1;padding:10px;border-radius:20px;font-size:15px;font-weight:600;color:var(--muted);
+  }
+  .seg button.active{background:#fff;color:#0a0b0d}
+  .amount{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+  .amount .val{font-size:54px;font-weight:600;letter-spacing:-1px;display:flex;align-items:baseline}
+  .amount .val .cur{color:var(--muted-2);margin-left:4px}
+  .max{
+    background:var(--pill);color:var(--muted);font-size:15px;font-weight:600;
+    padding:11px 20px;border-radius:22px;
+  }
+  .max:hover{background:#26292e}
+  .conv{display:flex;align-items:center;gap:8px;color:var(--blue-2);font-size:16px;font-weight:600;margin-bottom:34px}
+  .row{
+    display:flex;align-items:center;gap:14px;padding:14px 0;cursor:pointer;
+  }
+  .row+.row{border-top:1px solid var(--border)}
+  .row .ricon{
+    width:42px;height:42px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex:0 0 42px;
+  }
+  .ricon.bank{background:var(--blue)}
+  .ricon.btc{background:#f7931a}
+  .row .rtext{flex:1}
+  .row .rtext .t{font-size:16px;font-weight:600}
+  .row .rtext .s{font-size:14px;color:var(--muted)}
+  .chev{color:var(--muted)}
+  .cta{
+    width:100%;margin:22px 0 6px;padding:17px;border-radius:28px;
+    background:linear-gradient(90deg,#4a82f7,#6f6cf6);
+    color:#fff;font-size:17px;font-weight:600;
+  }
+  .cta:hover{filter:brightness(1.07)}
+  .quick{margin-top:22px;border-top:1px solid var(--border);padding-top:8px}
+  .quick .row .ricon{background:var(--blue)}
+  .quick .row .rtext .t{font-weight:600}
+
+  @media (max-width:1180px){
+    .content{flex-direction:column}
+    .col-side{flex:1 1 auto;width:100%;max-width:520px}
+    .buy{position:static}
+  }
+  @media (max-width:760px){
+    .sidebar{display:none}
+    .search{width:auto;flex:1}
+  }
+</style>
+</head>
+<body>
+
+<!-- Sidebar -->
+<aside class="sidebar">
+  <div class="logo">
+    <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="11" fill="#0a0b0d"/><path d="M12 4a8 8 0 1 0 0 16 8 8 0 0 0 0-16Zm0 11.2a3.2 3.2 0 1 1 3.05-4.2H18A6 6 0 1 0 12 18a6 6 0 0 0 6-4h-2.95A3.2 3.2 0 0 1 12 15.2Z" fill="#0a0b0d"/><rect x="9.2" y="9.6" width="5.6" height="4.8" rx="1" fill="#0a0b0d"/></svg>
+  </div>
+  <nav class="nav">
+    <a href="#"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><path d="M4 11 12 4l8 7"/><path d="M6 10v9h12v-9"/></svg>Home</a>
+    <a href="#"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><path d="M4 16 9 10l4 4 7-8"/><path d="M16 6h4v4"/></svg>Trade</a>
+    <a href="#"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="m15 9-2.5 5.5L7 17l2.5-5.5L15 9Z" fill="currentColor"/></svg>Coinbase One</a>
+    <a href="#"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><path d="M7 3h10v18l-2-1.5L13 21l-2-1.5L9 21l-2-1.5L5 21V3"/><path d="M9 8h6M9 12h6"/></svg>Transactions</a>
+    <a href="#"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><circle cx="12" cy="6" r="1.4" fill="currentColor"/><circle cx="12" cy="12" r="1.4" fill="currentColor"/><circle cx="12" cy="18" r="1.4" fill="currentColor"/></svg>See more</a>
+  </nav>
+  <div class="nav-bottom">
+    <a href="#"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><rect x="6" y="4" width="4" height="9" rx="1"/><path d="M8 13v7M8 4V2"/><rect x="14" y="9" width="4" height="9" rx="1"/><path d="M16 18v4M16 9V4"/></svg>Advanced</a>
+  </div>
+</aside>
+
+<!-- Main -->
+<div class="main">
+  <header class="topbar">
+    <button class="back-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 5l-7 7 7 7"/></svg></button>
+    <h1>Bitcoin</h1>
+    <div class="top-spacer"></div>
+    <label class="search">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <input placeholder="Search">
+    </label>
+    <button class="icon-btn"><span class="badge">4</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg></button>
+    <button class="icon-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.8.4-1 .9-1 1.7"/><circle cx="12" cy="17" r="0.6" fill="currentColor"/></svg></button>
+    <button class="icon-btn"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="6" cy="6" r="1.6"/><circle cx="12" cy="6" r="1.6"/><circle cx="18" cy="6" r="1.6"/><circle cx="6" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="18" cy="12" r="1.6"/><circle cx="6" cy="18" r="1.6"/><circle cx="12" cy="18" r="1.6"/><circle cx="18" cy="18" r="1.6"/></svg></button>
+    <div class="avatar">T</div>
+  </header>
+
+  <div class="content">
+    <!-- Main column -->
+    <section class="col-main">
+      <div class="price-head">
+        <div>
+          <div class="price">CA$101,570.83</div>
+          <div class="change">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M5 15l5-5 4 4 6-7"/><path d="M16 11h4V7"/></svg>
+            CA$315.14 (0.31%)
+          </div>
+        </div>
+        <button class="star"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m12 4 2.4 5 5.5.8-4 3.9.95 5.5L12 16.6 7.15 19.2 8.1 13.7l-4-3.9 5.5-.8L12 4Z"/></svg></button>
+      </div>
+
+      <div class="chart-wrap">
+        <svg class="chart" id="chart" viewBox="0 0 1000 260" preserveAspectRatio="none"></svg>
+        <div class="ann" id="annHigh">CA$102,411.58</div>
+        <div class="ann" id="annLow">CA$99,974.22</div>
+      </div>
+
+      <div class="ranges">
+        <button>1H</button>
+        <button class="active">1D</button>
+        <button>1W</button>
+        <button>1M</button>
+        <button>1Y</button>
+        <button>All</button>
+      </div>
+
+      <div class="subtabs">
+        <button>Balance</button>
+        <button class="active">Insights</button>
+      </div>
+
+      <div class="card">
+        <h3>Happening now</h3>
+        <span class="ai-tag"><span class="ai-dot"></span>AI generated · 30m ago</span>
+        <p>BTC's <strong>2.48%</strong> weekly slide masks major infrastructure upgrades, as <a href="#">CME's 24/7 trading launch</a> and <a href="#">Texas's Strategic Bitcoin Reserve committee</a> signal institutional maturation despite record <strong>$2.8B</strong> ETF outflows.</p>
+        <div class="sub">Infrastructure evolution amid flow headwinds</div>
+        <p>CME's perpetual futures expansion and <a href="#">Kalshi's CFTC-approved perpetuals</a> are enhancing institutional access even as retail ETF demand cools over the past nine days, while unique trader activity surged roughly <strong>27.7%</strong> over the past 24 hours.</p>
+        <button class="readmore">Read more</button>
+      </div>
+
+      <div class="about">
+        <h2>About Bitcoin</h2>
+        <p><a href="#">Bitcoin</a> (BTC) is a decentralized <a href="#">cryptocurrency</a> that was first described in a 2008 whitepaper by an individual or group of individuals using the alias <a href="#">Satoshi Nakamoto</a>. Officially launched in January 2009, Bitcoin is a <a href="#">peer-to-peer</a> online currency that allows transactions to happen directly between equal and independent network participants without the need for any intermediary. Bitcoin is digital money that cannot be inflated or manipulated by any individual, company, government, or central bank. Bitcoin is recognized as one of the initial cryptocurrencies to come into use and has inspired the creation of many others.</p>
+        <a href="#" class="readmore" style="display:inline-block;width:auto;padding:0;background:none;border:none;text-align:left">Read more</a>
+      </div>
+    </section>
+
+    <!-- Buy panel -->
+    <aside class="col-side">
+      <div class="buy">
+        <div class="seg">
+          <button class="active">Buy</button>
+          <button>Sell</button>
+          <button>Convert</button>
+        </div>
+
+        <div class="amount">
+          <div class="val">0<span class="cur">CAD</span></div>
+          <button class="max">Max</button>
+        </div>
+        <div class="conv">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 4v16M7 20l-3-3M7 4l3 3"/><path d="M17 20V4M17 4l3 3M17 20l-3-3"/></svg>
+          0 BTC
+        </div>
+
+        <div class="row">
+          <div class="ricon bank"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="#fff" stroke-width="1.8"><path d="M3 9 12 4l9 5"/><path d="M5 9v8M9 9v8M15 9v8M19 9v8"/><path d="M3 19h18"/></svg></div>
+          <div class="rtext"><div class="t">Pay with</div><div class="s">Select a payment method</div></div>
+          <svg class="chev" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 6 6 6-6 6"/></svg>
+        </div>
+        <div class="row">
+          <div class="ricon btc"><svg viewBox="0 0 24 24" width="22" height="22" fill="#fff"><path d="M15.6 10.6c.2-1.4-.85-2.15-2.3-2.65l.47-1.9-1.15-.29-.46 1.85c-.3-.08-.62-.15-.93-.22l.46-1.86-1.15-.28-.47 1.9c-.25-.06-.5-.11-.74-.18l-1.6-.4-.3 1.23s.86.2.84.21c.47.12.55.43.54.67l-1.3 5.2c-.06.14-.2.36-.53.28.01.02-.85-.21-.85-.21l-.57 1.32 1.5.37c.28.07.55.15.82.21l-.48 1.93 1.15.28.47-1.9c.31.09.62.16.92.24l-.47 1.89 1.15.29.48-1.93c1.96.37 3.43.22 4.05-1.55.5-1.42-.02-2.24-1.05-2.78.75-.17 1.32-.66 1.47-1.68Zm-2.63 3.67c-.36 1.42-2.76.65-3.53.46l.63-2.54c.78.2 3.28.58 2.9 2.08Zm.36-3.7c-.32 1.3-2.32.64-2.97.48l.57-2.3c.64.16 2.74.46 2.4 1.82Z"/></svg></div>
+          <div class="rtext"><div class="t">Buy</div><div class="s">Bitcoin</div></div>
+          <svg class="chev" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 6 6 6-6 6"/></svg>
+        </div>
+
+        <button class="cta">Continue to payment</button>
+
+        <div class="quick">
+          <div class="row">
+            <div class="ricon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="#fff" stroke-width="2"><path d="M12 20V5"/><path d="m6 11 6-6 6 6"/></svg></div>
+            <div class="rtext"><div class="t">Send crypto</div></div>
+          </div>
+          <div class="row">
+            <div class="ricon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="#fff" stroke-width="2"><path d="M12 4v15"/><path d="m6 13 6 6 6-6"/></svg></div>
+            <div class="rtext"><div class="t">Receive crypto</div></div>
+          </div>
+          <div class="row">
+            <div class="ricon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="#fff" stroke-width="1.8"><path d="M3 9 12 4l9 5"/><path d="M5 9v8M9 9v8M15 9v8M19 9v8"/><path d="M3 19h18"/></svg></div>
+            <div class="rtext"><div class="t">Deposit cash</div></div>
+          </div>
+          <div class="row">
+            <div class="ricon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="#fff" stroke-width="1.8"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M3 10h18"/></svg></div>
+            <div class="rtext"><div class="t">Withdraw cash</div></div>
+          </div>
+        </div>
+      </div>
+    </aside>
+  </div>
+</div>
+
+<script>
+// ---- Generate a believable BTC price line ----
+(function(){
+  const W=1000, H=260, n=160;
+  let v=100, pts=[], min=Infinity, max=-Infinity;
+  // seeded-ish pseudo random for stable look
+  let seed=42; function rnd(){ seed=(seed*9301+49297)%233280; return seed/233280; }
+  for(let i=0;i<n;i++){
+    v += (rnd()-0.48)*3.2 + Math.sin(i/9)*0.5;
+    pts.push(v);
+    if(v<min)min=v; if(v>max)max=v;
+  }
+  const padTop=30, padBot=40;
+  const x=i=> i/(n-1)*W;
+  const y=val=> padTop + (1-(val-min)/(max-min))*(H-padTop-padBot);
+
+  let d='M'+x(0)+' '+y(pts[0]);
+  for(let i=1;i<n;i++) d+=' L'+x(i)+' '+y(pts[i]);
+
+  const area=d+` L${W} ${H} L0 ${H} Z`;
+  const lastUp = pts[n-1] >= pts[0];
+
+  const svg=document.getElementById('chart');
+  svg.innerHTML=`
+    <defs>
+      <linearGradient id="fill" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#27ad75" stop-opacity="0.28"/>
+        <stop offset="100%" stop-color="#27ad75" stop-opacity="0"/>
+      </linearGradient>
+    </defs>
+    <line x1="0" y1="${y((min+max)/2)}" x2="${W}" y2="${y((min+max)/2)}" stroke="#3a3f47" stroke-width="1" stroke-dasharray="2 5"/>
+    <path d="${area}" fill="url(#fill)"/>
+    <path d="${d}" fill="none" stroke="#27ad75" stroke-width="2" stroke-linejoin="round"/>
+  `;
+
+  // position annotations near hi/lo
+  let hiI=pts.indexOf(max), loI=pts.indexOf(min);
+  const wrap=svg.parentElement, rect=()=>wrap.getBoundingClientRect();
+  function place(el,i,val,above){
+    const r=rect();
+    const px=x(i)/W*r.width, py=y(val)/H*r.height;
+    el.style.left=Math.min(Math.max(px-60,0),r.width-130)+'px';
+    el.style.top=(above?py-26:py+10)+'px';
+  }
+  function reflow(){ place(annHigh,hiI,max,true); place(annLow,loI,min,false); }
+  window.addEventListener('resize',reflow); reflow();
+})();
+</script>
+</body>
+</html>
