@@ -53,8 +53,8 @@ export function deriveHoldings(transactions: Tx[]): Holding[] {
   const byTicker = new Map<string, Tx[]>();
   for (const tx of transactions) {
     // Cash flows aren't holdings — they affect the cash balance, not ACB or
-    // share counts. Skip so we don't materialize a phantom $CASH "holding".
-    if (tx.kind === "DEPOSIT" || tx.kind === "WITHDRAWAL") continue;
+    // share counts. Skip so we don't materialize a phantom holding.
+    if (!tx.ticker) continue;
     const arr = byTicker.get(tx.ticker) ?? [];
     arr.push(tx);
     byTicker.set(tx.ticker, arr);
@@ -273,6 +273,7 @@ export function investedCapitalSeries(
   const series: { ts: number; close: number }[] = [];
 
   for (const tx of sorted) {
+    if (!tx.ticker) continue; // skip cash flows
     const isNonReg = isNonRegisteredKind(tx.brokerageKind);
 
     if (tx.kind === "BUY" || tx.kind === "TRANSFER_IN") {

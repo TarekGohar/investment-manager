@@ -43,6 +43,7 @@ export async function GET(req: Request) {
   const tickersByUser = new Map<string, Set<string>>();
   const allTickers = new Set<string>();
   for (const t of txTickers) {
+    if (!t.ticker) continue;
     if (!tickersByUser.has(t.userId)) tickersByUser.set(t.userId, new Set());
     tickersByUser.get(t.userId)!.add(t.ticker);
     allTickers.add(t.ticker);

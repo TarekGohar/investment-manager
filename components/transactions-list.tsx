@@ -43,6 +43,8 @@ function toEditValues(t: Tx): TransactionFormInitialValues {
     id: t.id,
     ticker: t.ticker,
     kind: t.kind,
+    currency: t.currency,
+    dividendType: t.dividendType,
     quantity: t.quantity,
     price: t.price,
     fees: t.fees,
@@ -123,7 +125,7 @@ function Row({ t, onEdit }: { t: Tx; onEdit: () => void }) {
       if (result.ok) {
         toast({
           title: "Transaction deleted",
-          description: `${t.kind} · ${t.ticker}`,
+          description: `${t.kind} · ${t.ticker ?? "Cash"}`,
           variant: "success",
         });
       } else {
@@ -140,16 +142,28 @@ function Row({ t, onEdit }: { t: Tx; onEdit: () => void }) {
   return (
     <div className="grid grid-cols-[110px_1.2fr_110px_0.9fr_0.9fr_1fr_80px] items-center gap-3 border-t border-border px-4 py-4 md:px-6">
       <div className="text-[13px] text-muted">{dateLabel(t.occurredAt)}</div>
-      <Link
-        href={`/positions/${t.ticker}`}
-        className="flex min-w-0 items-center gap-3 hover:underline"
-      >
-        <TickerBadge ticker={t.ticker} size={32} />
-        <div className="min-w-0">
-          <div className="truncate text-[14px] font-semibold">{t.ticker}</div>
-          {t.note ? <div className="truncate text-xs text-muted">{t.note}</div> : null}
+      {t.ticker ? (
+        <Link
+          href={`/positions/${t.ticker}`}
+          className="flex min-w-0 items-center gap-3 hover:underline"
+        >
+          <TickerBadge ticker={t.ticker} size={32} />
+          <div className="min-w-0">
+            <div className="truncate text-[14px] font-semibold">{t.ticker}</div>
+            {t.note ? <div className="truncate text-xs text-muted">{t.note}</div> : null}
+          </div>
+        </Link>
+      ) : (
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="flex h-[32px] w-[32px] items-center justify-center rounded-full bg-pill text-[10px] font-semibold text-muted">
+            $
+          </div>
+          <div className="min-w-0">
+            <div className="truncate text-[14px] font-semibold">Cash</div>
+            {t.note ? <div className="truncate text-xs text-muted">{t.note}</div> : null}
+          </div>
         </div>
-      </Link>
+      )}
       <div>
         <span
           className={`inline-block rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide ${badge.tone}`}

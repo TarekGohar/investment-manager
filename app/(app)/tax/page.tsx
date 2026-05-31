@@ -387,10 +387,13 @@ export default async function TaxPage() {
                 ]}
               />
               <p className="text-xs text-muted-2">
-                Heads-up: the T5 export reports gross dividend received but
-                doesn&apos;t split eligible vs non-eligible — that field isn&apos;t
-                yet captured at the transaction level. Use this for reconciliation,
-                not as a filing-ready document.
+                The T5 export buckets income by type (eligible / non-eligible
+                dividend, interest, foreign, return of capital) and reports
+                each currency separately — no FX conversion. For non-CAD
+                income, convert to CAD using the Bank of Canada exchange rate
+                at the time of receipt (or the annual average) per CRA
+                guidance before filing. Untagged dividends fall into an
+                &ldquo;Untagged — set type&rdquo; bucket so you can spot them.
               </p>
             </div>
           </section>

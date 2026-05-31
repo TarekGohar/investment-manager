@@ -58,7 +58,13 @@ export async function detectBehavioralPatterns(
   const overtradingEnabled = ips.overtradingPerMonth != null;
 
   if (panicSellEnabled || fomoBuyEnabled) {
-    const tickers = Array.from(new Set(transactions.map((t) => t.ticker)));
+    const tickers = Array.from(
+      new Set(
+        transactions
+          .map((t) => t.ticker)
+          .filter((t): t is string => t != null),
+      ),
+    );
     // Load enough candle history to look back from any transaction date.
     const maxWindow = Math.max(
       ips.panicSellWindowDays ?? 0,
@@ -75,6 +81,7 @@ export async function detectBehavioralPatterns(
     }
 
     for (const tx of transactions) {
+      if (!tx.ticker) continue; // cash flows can't trip these patterns
       if (tx.kind === "SELL" && panicSellEnabled) {
         const series = candlesByTicker.get(tx.ticker);
         if (!series || series.length === 0) continue;

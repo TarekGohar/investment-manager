@@ -15,7 +15,7 @@ import {
 } from "@/app/actions/contribution-room-check";
 import { useToast } from "@/components/toast-provider";
 import { formatCurrency } from "@/lib/format";
-import type { BrokerageKind } from "@/generated/prisma";
+import type { BrokerageKind, DividendType } from "@/generated/prisma";
 
 const KINDS = ["BUY", "SELL", "DIVIDEND", "SPLIT", "DEPOSIT", "WITHDRAWAL"] as const;
 type Kind = (typeof KINDS)[number];
@@ -29,8 +29,6 @@ const KIND_LABEL: Record<Kind, string> = {
   WITHDRAWAL: "Withdraw",
 };
 
-const CASH_TICKER = "$CASH";
-
 const inputClass =
   "w-full rounded-[10px] border border-border bg-bg px-3 py-2.5 text-[15px] outline-none transition-colors placeholder:text-muted-2 focus:border-brand";
 
@@ -38,12 +36,16 @@ export type TransactionFormBrokerage = {
   id: string;
   name: string;
   kind: BrokerageKind;
+  /** Default currency for transactions in this brokerage. Per-tx override allowed. */
+  currency: string;
 };
 
 export type TransactionFormInitialValues = {
   id: string;
-  ticker: string;
+  ticker: string | null;
   kind: Kind | "TRANSFER_IN" | "TRANSFER_OUT";
+  currency: string;
+  dividendType: DividendType | null;
   quantity: number;
   price: number;
   fees: number;
@@ -52,6 +54,17 @@ export type TransactionFormInitialValues = {
   splitRatio: number | null;
   brokerageId: string;
 };
+
+const DIVIDEND_TYPE_OPTIONS: Array<{ value: DividendType; label: string; hint: string }> = [
+  { value: "ELIGIBLE", label: "Eligible", hint: "Most CA public-company dividends (lower combined rate)" },
+  { value: "NON_ELIGIBLE", label: "Non-eligible", hint: "CCPC small-business-pool dividends" },
+  { value: "INTEREST", label: "Interest", hint: "Bond coupons, GICs — taxed as ordinary income" },
+  { value: "FOREIGN", label: "Foreign", hint: "US / international dividends — often with FWT" },
+  { value: "RETURN_OF_CAPITAL", label: "Return of capital", hint: "Reduces ACB instead of being income (REITs)" },
+  { value: "OTHER", label: "Other", hint: "Capital-gains distribution, special distribution" },
+];
+
+const COMMON_CURRENCIES = ["CAD", "USD", "EUR", "GBP"];
 
 export function TransactionForm({
   defaultTicker = "",
@@ -78,6 +91,12 @@ export function TransactionForm({
   const [ticker, setTicker] = useState(initial?.ticker ?? defaultTicker);
   const [brokerageId, setBrokerageId] = useState<string>(
     initial?.brokerageId ?? (brokerages[0]?.id ?? ""),
+  );
+  const [currency, setCurrency] = useState<string>(
+    initial?.currency ?? brokerages[0]?.currency ?? "CAD",
+  );
+  const [dividendType, setDividendType] = useState<DividendType | "">(
+    initial?.dividendType ?? "",
   );
 
   // Initialize form fields from initial values when editing
@@ -117,6 +136,15 @@ export function TransactionForm({
   const [roomCheck, setRoomCheck] = useState<ContributionRoomImpactCheck | null>(null);
 
   const selectedBrokerage = brokerages.find((b) => b.id === brokerageId);
+
+  // When the user switches brokerages, reset currency to the new brokerage's
+  // default. They can still pick a different currency afterwards (e.g. a
+  // USD dividend in a CAD-default brokerage).
+  useEffect(() => {
+    if (!editing && selectedBrokerage) {
+      setCurrency(selectedBrokerage.currency);
+    }
+  }, [selectedBrokerage, editing]);
 
   useEffect(() => {
     if (kind !== "BUY") {
@@ -198,6 +226,8 @@ export function TransactionForm({
     setSplitRatio("");
     setFees("");
     setNote("");
+    setDividendType("");
+    if (selectedBrokerage) setCurrency(selectedBrokerage.currency);
   }
 
   function onSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -206,10 +236,10 @@ export function TransactionForm({
     const fd = new FormData(e.currentTarget);
     fd.set("kind", kind);
     if (brokerageId) fd.set("brokerageId", brokerageId);
-    // Cash flows have no ticker — the server still requires a non-empty
-    // ticker field, so we inject a sentinel that downstream queries filter
-    // out of holdings/ACB logic.
-    if (isCashFlow) fd.set("ticker", CASH_TICKER);
+    if (currency) fd.set("currency", currency);
+    if (kind === "DIVIDEND" && dividendType) fd.set("dividendType", dividendType);
+    // Cash flows have no ticker.
+    if (isCashFlow) fd.delete("ticker");
 
     startTransition(async () => {
       const result = editing
@@ -307,6 +337,32 @@ export function TransactionForm({
         </Field>
       ) : null}
 
+      {/* Currency picker — shown for all kinds; defaults from brokerage but
+          overridable for USD dividends/buys held in a CAD-default account. */}
+      <Field
+        label="Currency"
+        help={
+          selectedBrokerage && currency !== selectedBrokerage.currency
+            ? `Brokerage default is ${selectedBrokerage.currency}; this transaction overrides to ${currency}.`
+            : undefined
+        }
+      >
+        <select
+          value={currency}
+          onChange={(e) => setCurrency(e.target.value)}
+          className={inputClass}
+        >
+          {Array.from(new Set([
+            ...(selectedBrokerage ? [selectedBrokerage.currency] : []),
+            ...COMMON_CURRENCIES,
+          ])).map((c) => (
+            <option key={c} value={c}>
+              {c}
+            </option>
+          ))}
+        </select>
+      </Field>
+
       {showShareFields ? (
         <>
           <Field label="Quantity (shares)">
@@ -390,6 +446,27 @@ export function TransactionForm({
             </div>
           ) : null}
         </>
+      ) : null}
+
+      {kind === "DIVIDEND" ? (
+        <Field
+          label="Dividend type"
+          help="Drives which tax rate the after-tax math uses and which T5 box this amount goes to."
+        >
+          <select
+            value={dividendType}
+            onChange={(e) => setDividendType(e.target.value as DividendType | "")}
+            className={inputClass}
+            required
+          >
+            <option value="">— Select —</option>
+            {DIVIDEND_TYPE_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label} — {o.hint}
+              </option>
+            ))}
+          </select>
+        </Field>
       ) : null}
 
       {showAmount ? (

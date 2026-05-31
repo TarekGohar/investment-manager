@@ -91,6 +91,21 @@ model Verification {
 
 // ─── Domain: portfolio + transactions ──────────────────────────────────
 
+enum DividendType {
+  /// Most Canadian public-company dividends (lower combined rate).
+  ELIGIBLE
+  /// CCPC small-business-pool dividends (higher combined rate).
+  NON_ELIGIBLE
+  /// Interest, bond coupons, GIC payouts — taxed as ordinary income.
+  INTEREST
+  /// Dividends from foreign (US / intl) corporations. Often paid with FWT.
+  FOREIGN
+  /// Distribution that reduces ACB rather than being taxable income (REITs).
+  RETURN_OF_CAPITAL
+  /// Catch-all for unusual distributions (capital-gains distributions, etc.).
+  OTHER
+}
+
 enum TransactionKind {
   BUY
   SELL
@@ -163,17 +178,26 @@ model Transaction {
   id          String          @id @default(cuid())
   userId      String
   brokerageId String
-  ticker      String
+  /// Null for cash flows (DEPOSIT / WITHDRAWAL). Required otherwise.
+  ticker      String?
   kind        TransactionKind
-  // For BUY/SELL: shares. For DIVIDEND: 1 (price holds the $ amount). For SPLIT: 0.
+  /// Currency of all amount fields in this row (price, fees, etc.). Defaults
+  /// from the brokerage at write time but can be overridden per transaction
+  /// — e.g. a USD dividend on a US-listed stock held in a CAD-default
+  /// brokerage. No FX is performed; cash balances aggregate per currency.
+  currency    String          @default("CAD")
+  // For BUY/SELL: shares. For DIVIDEND/DEPOSIT/WITHDRAWAL: 1 (price holds the $ amount). For SPLIT: 0.
   quantity    Decimal         @db.Decimal(18, 6)
-  // For BUY/SELL: per-share. For DIVIDEND: total dividend received. For SPLIT: 0.
+  // For BUY/SELL: per-share. For DIVIDEND/DEPOSIT/WITHDRAWAL: total amount. For SPLIT: 0.
   price       Decimal         @db.Decimal(18, 4)
   fees        Decimal         @default(0) @db.Decimal(18, 4)
   // For DIVIDEND on foreign securities held in non-registered accounts: the
   // amount of foreign withholding tax withheld at source. Recoverable via
   // T1 foreign tax credit. Zero or null otherwise.
   foreignTaxWithheld Decimal? @db.Decimal(18, 4)
+  /// Only meaningful for DIVIDEND. Drives T5 export bucketing and which
+  /// marginal rate the after-tax math uses.
+  dividendType DividendType?
   occurredAt  DateTime
   note        String?
   // For SPLIT only: new shares per old share (e.g. 2 for a 2-for-1).

@@ -22,10 +22,12 @@ function serializeTx(t: TransactionWithBrokerage): Tx {
     brokerageKind: t.brokerage.kind,
     ticker: t.ticker,
     kind: t.kind,
+    currency: t.currency,
     quantity: t.quantity.toNumber(),
     price: t.price.toNumber(),
     fees: t.fees.toNumber(),
     foreignTaxWithheld: t.foreignTaxWithheld ? t.foreignTaxWithheld.toNumber() : 0,
+    dividendType: t.dividendType,
     occurredAt: t.occurredAt,
     note: t.note,
     splitRatio: t.splitRatio ? t.splitRatio.toNumber() : null,
@@ -36,7 +38,7 @@ export async function listTransactions(
   userId: string,
   opts: { ticker?: string } = {},
 ): Promise<Tx[]> {
-  const where: { userId: string; ticker?: string } = { userId };
+  const where: { userId: string; ticker?: string | null } = { userId };
   if (opts.ticker) where.ticker = opts.ticker.toUpperCase();
 
   const rows = await prisma.transaction.findMany({
@@ -181,7 +183,7 @@ export async function getUserTickers(userId: string): Promise<UserTicker[]> {
     }),
   ]);
   const seen = new Map<string, UserTicker["source"]>();
-  for (const t of txTickers) seen.set(t.ticker, "holding");
+  for (const t of txTickers) if (t.ticker) seen.set(t.ticker, "holding");
   for (const w of watch) if (!seen.has(w.ticker)) seen.set(w.ticker, "watchlist");
   return Array.from(seen.entries())
     .map(([ticker, source]) => ({ ticker, source }))

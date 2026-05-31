@@ -53,9 +53,10 @@ export type ActiveSuperficialLossWindow = {
  * 30-day window in both directions for any same-ticker BUY/TRANSFER_IN.
  */
 export function detectSuperficialLosses(transactions: Tx[]): SuperficialLossViolation[] {
-  // Group per ticker
+  // Group per ticker — cash flows (null ticker) skipped.
   const byTicker = new Map<string, Tx[]>();
   for (const tx of transactions) {
+    if (!tx.ticker) continue;
     const arr = byTicker.get(tx.ticker) ?? [];
     arr.push(tx);
     byTicker.set(tx.ticker, arr);
@@ -197,6 +198,7 @@ export function getActiveSuperficialLossWindows(
   const byTicker = new Map<string, Tx[]>();
   for (const tx of transactions) {
     if (tx.kind !== "SELL") continue;
+    if (!tx.ticker) continue;
     if (!isNonRegisteredKind(tx.brokerageKind)) continue;
     if (tx.occurredAt < cutoff) continue;
     const arr = byTicker.get(tx.ticker) ?? [];

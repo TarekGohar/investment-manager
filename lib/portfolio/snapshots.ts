@@ -216,6 +216,8 @@ async function listTransactionsForSnapshot(userId: string): Promise<Tx[]> {
     brokerageKind: t.brokerage.kind,
     ticker: t.ticker,
     kind: t.kind,
+    currency: t.currency,
+    dividendType: t.dividendType,
     quantity: t.quantity.toNumber(),
     price: t.price.toNumber(),
     fees: t.fees.toNumber(),
@@ -252,7 +254,9 @@ async function upsertSnapshot(userId: string, row: PortfolioSnapshotRow) {
 
 function uniqueTickers(txns: Tx[]): string[] {
   const set = new Set<string>();
-  for (const t of txns) set.add(t.ticker);
+  for (const t of txns) {
+    if (t.ticker) set.add(t.ticker);
+  }
   return Array.from(set);
 }
 

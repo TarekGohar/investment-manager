@@ -8,20 +8,60 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { ensureDefaultBrokerage } from "@/lib/portfolio/queries";
 
-function refreshTransactionPaths(ticker: string) {
+function refreshTransactionPaths(ticker: string | null) {
   revalidatePath("/");
   revalidatePath("/portfolio");
   revalidatePath("/transactions");
-  revalidatePath(`/positions/${ticker}`);
+  if (ticker) revalidatePath(`/positions/${ticker}`);
+}
+
+/**
+ * Resolve the currency for a transaction: explicit form value > brokerage
+ * default. Brokerages exist before any transactions, so this always finds
+ * something.
+ */
+async function resolveCurrency(
+  brokerageId: string,
+  override: string | undefined,
+): Promise<string> {
+  if (override) return override.toUpperCase();
+  const b = await prisma.brokerage.findUnique({
+    where: { id: brokerageId },
+    select: { currency: true },
+  });
+  return (b?.currency ?? "CAD").toUpperCase();
 }
 
 const Schema = z
   .object({
-    ticker: z.string().trim().toUpperCase().min(1).max(10),
+    ticker: z
+      .string()
+      .trim()
+      .toUpperCase()
+      .max(10)
+      .optional()
+      .transform((v) => (v && v.length > 0 ? v : null)),
     kind: z.enum([
       "BUY", "SELL", "DIVIDEND", "SPLIT", "TRANSFER_IN", "TRANSFER_OUT",
       "DEPOSIT", "WITHDRAWAL",
     ]),
+    currency: z
+      .string()
+      .trim()
+      .toUpperCase()
+      .min(3)
+      .max(3)
+      .optional(),
+    dividendType: z
+      .enum([
+        "ELIGIBLE",
+        "NON_ELIGIBLE",
+        "INTEREST",
+        "FOREIGN",
+        "RETURN_OF_CAPITAL",
+        "OTHER",
+      ])
+      .optional(),
     quantity: z.coerce.number().nonnegative().optional(),
     price: z.coerce.number().nonnegative().optional(),
     amount: z.coerce.number().nonnegative().optional(),
@@ -40,6 +80,10 @@ const Schema = z
       .transform((v) => (v ? v : undefined)),
   })
   .superRefine((data, ctx) => {
+    const isCashFlow = data.kind === "DEPOSIT" || data.kind === "WITHDRAWAL";
+    if (!isCashFlow && !data.ticker) {
+      ctx.addIssue({ code: "custom", path: ["ticker"], message: "Ticker is required." });
+    }
     if (data.kind === "BUY" || data.kind === "SELL" || data.kind === "TRANSFER_IN" || data.kind === "TRANSFER_OUT") {
       if (!data.quantity || data.quantity <= 0) {
         ctx.addIssue({ code: "custom", path: ["quantity"], message: "Quantity is required and must be > 0." });
@@ -51,6 +95,13 @@ const Schema = z
     if (data.kind === "DIVIDEND") {
       if (!data.amount || data.amount <= 0) {
         ctx.addIssue({ code: "custom", path: ["amount"], message: "Dividend amount is required." });
+      }
+      if (!data.dividendType) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["dividendType"],
+          message: "Dividend type is required — picks the right tax rate and slip box.",
+        });
       }
     }
     if (data.kind === "DEPOSIT" || data.kind === "WITHDRAWAL") {
@@ -109,12 +160,17 @@ export async function createTransactionAction(formData: FormData): Promise<Creat
       price = data.price!;
   }
 
+  const effectiveBrokerageId = data.brokerageId ?? brokerageId;
+  const currency = await resolveCurrency(effectiveBrokerageId, data.currency);
+
   await prisma.transaction.create({
     data: {
       userId: session.user.id,
-      brokerageId: data.brokerageId ?? brokerageId,
+      brokerageId: effectiveBrokerageId,
       ticker: data.ticker,
       kind: data.kind,
+      currency,
+      dividendType: data.kind === "DIVIDEND" ? data.dividendType : null,
       quantity: qty,
       price,
       fees: data.fees,
@@ -175,6 +231,7 @@ export async function updateTransactionAction(
 
   // If brokerage isn't specified, keep the existing one
   const brokerageId = data.brokerageId ?? (await ensureDefaultBrokerage(session.user.id));
+  const currency = await resolveCurrency(brokerageId, data.currency);
 
   await prisma.transaction.update({
     where: { id },
@@ -182,6 +239,8 @@ export async function updateTransactionAction(
       brokerageId,
       ticker: data.ticker,
       kind: data.kind,
+      currency,
+      dividendType: data.kind === "DIVIDEND" ? data.dividendType : null,
       quantity: qty,
       price,
       fees: data.fees,

@@ -62,11 +62,16 @@ export async function getPerformanceSummary(
     currentValue = snapshots[snapshots.length - 1].totalMarketValue;
   }
   if (currentValue === 0 && transactions.length > 0) {
-    const tickers = Array.from(new Set(transactions.map((t) => t.ticker)));
+    const tickers = Array.from(
+      new Set(
+        transactions
+          .map((t) => t.ticker)
+          .filter((t): t is string => t != null),
+      ),
+    );
     const quotes = await getQuotes(tickers);
-    for (const t of transactions) {
-      // sloppy fallback — not used in normal flow
-      void quotes.get(t.ticker);
+    for (const t of tickers) {
+      void quotes.get(t);
     }
   }
 
@@ -137,11 +142,13 @@ export async function getCorrelationMatrix(
     tickers = snaps[snaps.length - 1].holdings.map((h) => h.ticker);
   } else {
     const rows = await prisma.transaction.findMany({
-      where: { userId },
+      where: { userId, ticker: { not: null } },
       select: { ticker: true },
       distinct: ["ticker"],
     });
-    tickers = rows.map((r) => r.ticker);
+    tickers = rows
+      .map((r) => r.ticker)
+      .filter((t): t is string => t != null);
   }
   if (tickers.length < 2) return null;
 

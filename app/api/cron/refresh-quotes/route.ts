@@ -34,7 +34,7 @@ export async function GET(req: Request) {
   ]);
 
   const tickers = new Set<string>();
-  for (const t of txTickers) tickers.add(t.ticker);
+  for (const t of txTickers) if (t.ticker) tickers.add(t.ticker);
   for (const w of watch) tickers.add(w.ticker);
   for (const a of alertTickers) if (a.ticker) tickers.add(a.ticker);
 

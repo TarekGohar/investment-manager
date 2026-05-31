@@ -17,8 +17,9 @@ export type CashBalance = {
   brokerageId: string;
   brokerageName: string;
   brokerageKind: BrokerageKind;
+  /** Currency this balance is denominated in. Brokerages can hold multiple. */
   currency: string;
-  /** Net cash currently sitting in the account. */
+  /** Net cash currently sitting in the account in this currency. */
   balance: number;
   /** Lifetime cash deposited externally (DEPOSIT only). */
   totalDeposits: number;
@@ -61,8 +62,13 @@ export function cashDeltaForTx(tx: Tx): number {
 }
 
 /**
- * Aggregate cash balance per brokerage. Walks the user's whole transaction
- * history; brokerages with no transactions still appear with a balance of 0.
+ * Aggregate cash balance per (brokerage, currency). A single brokerage can
+ * hold balances in multiple currencies (e.g. a non-reg account with both
+ * CAD and USD positions). Each currency aggregates separately — no FX is
+ * performed.
+ *
+ * Brokerages with no transactions are still included with a single row in
+ * their default currency, balance 0, so the UI can show them as "empty".
  */
 export async function getCashBalances(userId: string): Promise<CashBalance[]> {
   const [brokerages, transactions] = await Promise.all([
@@ -76,6 +82,7 @@ export async function getCashBalances(userId: string): Promise<CashBalance[]> {
       select: {
         brokerageId: true,
         kind: true,
+        currency: true,
         quantity: true,
         price: true,
         fees: true,
@@ -91,25 +98,39 @@ export async function getCashBalances(userId: string): Promise<CashBalance[]> {
     internalIn: number;
     internalOut: number;
   };
-  const acc = new Map<string, Accum>();
-  for (const b of brokerages) {
-    acc.set(b.id, { balance: 0, deposits: 0, withdrawals: 0, internalIn: 0, internalOut: 0 });
+  const acc = new Map<string, Accum>(); // key: "brokerageId|CURRENCY"
+  const brokerageById = new Map(brokerages.map((b) => [b.id, b]));
+
+  function ensure(brokerageId: string, currency: string): Accum {
+    const k = `${brokerageId}|${currency}`;
+    let a = acc.get(k);
+    if (!a) {
+      a = { balance: 0, deposits: 0, withdrawals: 0, internalIn: 0, internalOut: 0 };
+      acc.set(k, a);
+    }
+    return a;
   }
 
+  // Seed each brokerage's default currency so empty accounts still appear
+  for (const b of brokerages) ensure(b.id, b.currency.toUpperCase());
+
   for (const t of transactions) {
-    const a = acc.get(t.brokerageId);
-    if (!a) continue;
+    const brokerage = brokerageById.get(t.brokerageId);
+    if (!brokerage) continue;
+    const currency = (t.currency || brokerage.currency).toUpperCase();
+    const a = ensure(t.brokerageId, currency);
     const delta = cashDeltaForTx({
-      // Only the fields cashDeltaForTx reads are populated.
       id: "",
       brokerageId: t.brokerageId,
       brokerageKind: "NON_REGISTERED",
-      ticker: "",
+      ticker: null,
       kind: t.kind,
+      currency,
       quantity: t.quantity.toNumber(),
       price: t.price.toNumber(),
       fees: t.fees.toNumber(),
       foreignTaxWithheld: t.foreignTaxWithheld ? t.foreignTaxWithheld.toNumber() : 0,
+      dividendType: null,
       occurredAt: new Date(),
       note: null,
       splitRatio: null,
@@ -121,20 +142,32 @@ export async function getCashBalances(userId: string): Promise<CashBalance[]> {
     else if (delta < 0) a.internalOut += Math.abs(delta);
   }
 
-  return brokerages.map((b): CashBalance => {
-    const a = acc.get(b.id)!;
-    return {
-      brokerageId: b.id,
+  const out: CashBalance[] = [];
+  for (const [key, a] of acc) {
+    const [brokerageId, currency] = key.split("|");
+    const b = brokerageById.get(brokerageId);
+    if (!b) continue;
+    out.push({
+      brokerageId,
       brokerageName: b.name,
       brokerageKind: b.kind,
-      currency: b.currency,
+      currency,
       balance: a.balance,
       totalDeposits: a.deposits,
       totalWithdrawals: a.withdrawals,
       totalInternalInflow: a.internalIn,
       totalInternalOutflow: a.internalOut,
-    };
+    });
+  }
+  // Stable order: brokerage creation order, then currency alpha
+  const orderIndex = new Map(brokerages.map((b, i) => [b.id, i]));
+  out.sort((a, b) => {
+    const oa = orderIndex.get(a.brokerageId) ?? 0;
+    const ob = orderIndex.get(b.brokerageId) ?? 0;
+    if (oa !== ob) return oa - ob;
+    return a.currency.localeCompare(b.currency);
   });
+  return out;
 }
 
 export type CashSummary = {

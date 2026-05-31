@@ -18,7 +18,11 @@ export const QC_TOP_MARGINAL_RATES_REFERENCE = {
   ordinaryIncome: 0.5331,
   capitalGains: 0.2665,
   eligibleDividend: 0.4011,
-  nonEligibleDividend: 0.4827,
+  /**
+   * 0.4870 per current EY / KPMG / Revenu Québec 2025 personal-tax
+   * calculators (previously 0.4827, which was a stale reference).
+   */
+  nonEligibleDividend: 0.4870,
 } as const;
 
 /** Canadian capital-gains inclusion rate. Statutory, not a personal number. */

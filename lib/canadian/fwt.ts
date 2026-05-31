@@ -50,6 +50,7 @@ export async function getFwtRollupForYear(
   // Aggregate by (ticker, brokerageKind)
   const map = new Map<string, FwtRow>();
   for (const r of rows) {
+    if (!r.ticker) continue; // dividend transactions always have a ticker, but TS
     const kind = r.brokerage.kind;
     const fwt = r.foreignTaxWithheld?.toNumber() ?? 0;
     if (fwt <= 0) continue;

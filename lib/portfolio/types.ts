@@ -1,15 +1,19 @@
-import type { BrokerageKind, TransactionKind } from "@/generated/prisma";
+import type { BrokerageKind, DividendType, TransactionKind } from "@/generated/prisma";
 
 export type Tx = {
   id: string;
   brokerageId: string;
   brokerageKind: BrokerageKind;
-  ticker: string;
+  /** Null for cash flows (DEPOSIT / WITHDRAWAL). */
+  ticker: string | null;
   kind: TransactionKind;
+  /** Currency of all amount fields in this row. Defaulted from brokerage at write time. */
+  currency: string;
   quantity: number;
   price: number;
   fees: number;
   foreignTaxWithheld: number;
+  dividendType: DividendType | null;
   occurredAt: Date;
   note: string | null;
   splitRatio: number | null;

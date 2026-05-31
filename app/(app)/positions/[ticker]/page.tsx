@@ -88,7 +88,7 @@ export default async function PositionPage({
     prisma.brokerage.findMany({
       where: { userId: session.user.id },
       orderBy: { createdAt: "asc" },
-      select: { id: true, name: true, kind: true },
+      select: { id: true, name: true, kind: true, currency: true },
     }),
   ]);
 

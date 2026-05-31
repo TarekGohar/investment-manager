@@ -28,7 +28,10 @@ export async function GET(req: Request) {
 
   const [txTickers, watchTickers, alertTickers] = await Promise.all([
     prisma.transaction.findMany({
-      where: { userId: { in: Array.from(enabledUserIds) } },
+      where: {
+        userId: { in: Array.from(enabledUserIds) },
+        ticker: { not: null },
+      },
       select: { ticker: true },
       distinct: ["ticker"],
     }),
@@ -48,7 +51,7 @@ export async function GET(req: Request) {
   ]);
 
   const tickerSet = new Set<string>();
-  for (const t of txTickers) tickerSet.add(t.ticker);
+  for (const t of txTickers) if (t.ticker) tickerSet.add(t.ticker);
   for (const t of watchTickers) tickerSet.add(t.ticker);
   for (const t of alertTickers) if (t.ticker) tickerSet.add(t.ticker);
   if (tickerSet.size === 0) {
