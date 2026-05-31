@@ -112,6 +112,12 @@ export type CseListingMetadata = {
 export async function cseResolveListing(
   urlOrSlug: string,
 ): Promise<CseListingMetadata | null> {
+  // Accept any of:
+  //   https://thecse.com/en/listings/<sector>/<company-slug>
+  //   https://thecse.com/listings/<company-slug>/
+  //   https://thecse.com/en/listings/<company-slug>
+  //   "<sector>/<company-slug>"
+  //   "<company-slug>"
   const url = urlOrSlug.startsWith("http")
     ? urlOrSlug
     : `https://thecse.com/en/listings/${urlOrSlug.replace(/^\/+/, "")}`;
@@ -127,11 +133,15 @@ export async function cseResolveListing(
     if (!pp?.symbol || !md?.sedar_filings) return null;
     const issuerIdMatch = String(md.sedar_filings).match(/sedar_filings\/(\d+)\.json/);
     if (!issuerIdMatch) return null;
-    // Slug comes from the URL path itself: /en/listings/<sector-slug>/<company-slug>
-    const slugMatch = new URL(url).pathname.match(
-      /\/en\/listings\/([^/]+)\/([^/?#]+)/,
-    );
-    const slug = slugMatch ? `${slugMatch[1]}/${slugMatch[2]}` : (pp.slug ?? "");
+
+    // Extract slug from whichever URL form. We accept either:
+    //   /en/listings/<sector>/<company-slug>  (canonical)
+    //   /en/listings/<company-slug>           (CSE accepts this redirect)
+    //   /listings/<company-slug>              (the form CSE auto-redirects from)
+    const finalUrl = new URL(res.url || url);
+    const segments = finalUrl.pathname.split("/").filter((s) => s && s !== "en" && s !== "listings");
+    const slug = segments.join("/") || pp.slug || "";
+
     return {
       symbol: pp.symbol,
       name: md.security_name ?? pp.title ?? pp.symbol,
@@ -144,6 +154,89 @@ export async function cseResolveListing(
     };
   } catch (err) {
     console.error(`[cse] resolveListing failed for ${urlOrSlug}:`, (err as Error).message);
+    return null;
+  }
+}
+
+export type CseQuote = {
+  symbol: string;
+  name: string;
+  lastPrice: number | null;
+  prevClose: number | null;
+  netChange: number | null;
+  netChangePct: number | null;
+  dayHigh: number | null;
+  dayLow: number | null;
+  volume: number | null;
+  tradeCount: number | null;
+  tradingValueCad: number | null;
+  bidPrice: number | null;
+  askPrice: number | null;
+  bidSize: number | null;
+  askSize: number | null;
+  asOf: Date;
+};
+
+/**
+ * Fetch live quote + bid/ask for a CSE-listed issuer by scraping its
+ * listing page. The Next.js data blob contains structured quote fields.
+ *
+ * `slug` is the path segment after `/en/listings/`, e.g.
+ * `"life-sciences/mountain-valley-md-holdings-inc"`. Stored on
+ * TickerListing.cseSlug after the user pastes the URL once.
+ */
+export async function cseGetQuote(slug: string): Promise<CseQuote | null> {
+  if (!slug) return null;
+  try {
+    const res = await fetch(`https://thecse.com/en/listings/${slug.replace(/^\/+/, "")}`, {
+      headers: COMMON_HEADERS,
+      cache: "no-store",
+    });
+    if (!res.ok) return null;
+    const html = await res.text();
+    const m = html.match(/<script[^>]*id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/);
+    if (!m) return null;
+    const data = JSON.parse(m[1]);
+    const pp = data.props?.pageProps;
+    const scd = pp?.staticCompanyData;
+    if (!scd) return null;
+
+    const consolidated = scd.consolidated?.ticker as Record<string, number | string> | undefined;
+    const quote = scd.quote as Record<string, number | string> | undefined;
+    const md = scd.metadata as Record<string, string> | undefined;
+    const updatedAt = scd.updated_at as { date?: string; time?: string } | undefined;
+    if (!consolidated && !quote) return null;
+
+    const num = (v: unknown): number | null =>
+      typeof v === "number" && Number.isFinite(v)
+        ? v
+        : typeof v === "string" && !isNaN(Number(v))
+          ? Number(v)
+          : null;
+
+    return {
+      symbol: pp.symbol ?? md?.symbol ?? "",
+      name: md?.security_name ?? pp.title ?? pp.symbol ?? "",
+      lastPrice: num(consolidated?.["Last Price"]),
+      prevClose: num(consolidated?.["Previous Closing Price"]),
+      netChange: num(consolidated?.["Net Change"]),
+      netChangePct: num(consolidated?.["Net Change Percentage"]),
+      dayHigh: num(consolidated?.["Days High Price"]),
+      dayLow: num(consolidated?.["Days Low Price"]),
+      volume: num(consolidated?.["Trading Volume"]),
+      tradeCount: num(consolidated?.["Trade Count"]),
+      tradingValueCad: num(consolidated?.["Trading Value (CAD)"]),
+      bidPrice: num(quote?.["Bid Price"]),
+      askPrice: num(quote?.["Ask Price"]),
+      bidSize: num(quote?.["Bid Size"]),
+      askSize: num(quote?.["Ask Size"]),
+      asOf:
+        updatedAt?.date && updatedAt?.time
+          ? new Date(`${updatedAt.date}T${updatedAt.time}-04:00`)
+          : new Date(),
+    };
+  } catch (err) {
+    console.error(`[cse] getQuote failed for ${slug}:`, (err as Error).message);
     return null;
   }
 }

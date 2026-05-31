@@ -136,6 +136,9 @@ export async function getCorrelationMatrix(
   userId: string,
 ): Promise<CorrelationData | null> {
   // Pull held tickers from current holdings (via snapshots tail) or txns.
+  // Legacy snapshots may contain "$CASH" or other non-tradeable strings
+  // from when DEPOSIT/WITHDRAWAL transactions used a sentinel ticker. Filter
+  // those out before fanning to getCandles.
   const snaps = await listSnapshots(userId);
   let tickers: string[] = [];
   if (snaps.length > 0) {
@@ -150,6 +153,7 @@ export async function getCorrelationMatrix(
       .map((r) => r.ticker)
       .filter((t): t is string => t != null);
   }
+  tickers = tickers.filter((t) => /^[A-Z][A-Z0-9.-]{0,15}$/.test(t.toUpperCase()));
   if (tickers.length < 2) return null;
 
   // Fetch ~180 days of candles for each ticker.

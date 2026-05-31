@@ -454,7 +454,7 @@ export default async function PositionPage({
       insiderTransactions={insiderTxns}
       latestSummary={latestQuarterly}
       isUsListed={cikInfo != null}
-      hasCseListing={tickerListing?.cseIssuerId != null}
+      hasCseListing={tickerListing?.cseIssuerId != null && Boolean(tickerListing?.cseSlug)}
       isCseTicker={/\.CN$/i.test(ticker)}
     />
   );
