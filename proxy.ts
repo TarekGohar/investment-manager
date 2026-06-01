@@ -11,19 +11,17 @@ function isPublic(pathname: string): boolean {
 
 export function proxy(request: NextRequest): NextResponse {
   const { pathname } = request.nextUrl;
-  const sessionCookie = getSessionCookie(request);
-
-  // Authed user trying to reach sign-in → bounce home
-  if (sessionCookie && pathname === "/sign-in") {
-    return NextResponse.redirect(new URL("/", request.url));
-  }
 
   if (isPublic(pathname)) {
     return NextResponse.next();
   }
 
-  // Unauthed user trying to reach protected route → bounce to sign-in,
-  // preserving the destination so we can resume after auth
+  // getSessionCookie only checks token presence, not validity. That's fine
+  // here as a fast gate to avoid hitting the DB for obviously-unauthed
+  // requests; the page itself revalidates and can redirect on its own if
+  // the cookie is stale. Don't use cookie presence to bounce authed users
+  // off /sign-in — that creates a loop when the cookie is expired.
+  const sessionCookie = getSessionCookie(request);
   if (!sessionCookie) {
     const signInUrl = new URL("/sign-in", request.url);
     if (pathname !== "/") {

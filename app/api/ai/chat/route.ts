@@ -70,6 +70,7 @@ export async function POST(req: Request) {
       let finalToolCalls: ToolCall[] = [];
       const toolMeta = new Map<string, { name: string; result: string }>();
       let usage: { inputTokens: number; outputTokens: number } | undefined;
+      let finishReason: string | undefined;
 
       try {
         for await (const ev of provider.streamChat({
@@ -95,6 +96,7 @@ export async function POST(req: Request) {
               finalText = ev.finalText;
               finalToolCalls = ev.finalToolCalls;
               usage = ev.usage;
+              finishReason = ev.finishReason;
               break;
             case "error":
               send("error", { error: ev.error });
@@ -102,19 +104,56 @@ export async function POST(req: Request) {
           }
         }
 
-        // Persist whatever we got — even on abort, save partial output
-        for (const tc of finalToolCalls) {
-          const meta = toolMeta.get(tc.id);
-          if (meta) {
-            await saveToolMessage(conversation.id, tc.id, meta.name, meta.result);
-          }
+        // If the model didn't finish cleanly, surface a one-line warning to
+        // the user so a truncated / safety-filtered response doesn't look
+        // like a bug or "the AI is bad". Common causes:
+        //   "length"          → hit max_tokens cap (raise it)
+        //   "content_filter"  → Azure RAI intervened (may also corrupt the tail)
+        //   undefined         → stream was aborted before any finish chunk
+        if (finishReason && finishReason !== "stop" && finishReason !== "tool_calls") {
+          const reason =
+            finishReason === "length"
+              ? "Response was truncated at the max-tokens cap. Ask a more focused question or split it in two."
+              : finishReason === "content_filter"
+                ? "Azure's content filter cut the response short. The tail may also be garbled. Try rephrasing without potentially sensitive terms."
+                : `Stream ended unexpectedly (${finishReason}).`;
+          send("warning", { reason });
         }
-        if (finalText || finalToolCalls.length > 0) {
+
+        // Persist in OpenAI-replay-compatible order. For a turn that used
+        // tools the structure must be:
+        //   assistant { content: "", tool_calls: [...] }   ← the call
+        //   tool      { tool_call_id, content: result }    ← the result
+        //   assistant { content: finalText }               ← the reply
+        // Saving tool results before the calling assistant message broke
+        // the second turn with a 400 from the API: "messages with role
+        // 'tool' must be a response to a preceeding message with
+        // 'tool_calls'". The sequential awaits also guarantee monotonic
+        // createdAt, so listMessages returns them in this exact order.
+        if (finalToolCalls.length > 0) {
           await saveAssistantMessage(conversation.id, {
-            text: finalText,
-            toolCalls: finalToolCalls.length > 0 ? finalToolCalls : undefined,
+            text: "",
+            toolCalls: finalToolCalls,
             model,
             inputTokens: usage?.inputTokens,
+            // Attribute output tokens to the reply message below; this
+            // intermediate "calls" message has no text output of its own.
+          });
+          for (const tc of finalToolCalls) {
+            const meta = toolMeta.get(tc.id);
+            if (meta) {
+              await saveToolMessage(conversation.id, tc.id, meta.name, meta.result);
+            }
+          }
+        }
+        if (finalText) {
+          await saveAssistantMessage(conversation.id, {
+            text: finalText,
+            toolCalls: undefined,
+            model,
+            // Input tokens are attributed to the calls message above
+            // (where they were actually spent). Output goes here.
+            inputTokens: finalToolCalls.length > 0 ? undefined : usage?.inputTokens,
             outputTokens: usage?.outputTokens,
           });
         }

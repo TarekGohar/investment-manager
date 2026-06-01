@@ -21,6 +21,10 @@ type DisplayMessage =
       tools: ToolUse[];
       streaming: boolean;
       error?: string;
+      /** Surfaced when the model stops for a non-clean finish_reason
+       *  (length cap, content filter, abort). Helps the user tell a
+       *  truncated/garbled response from a real bug. */
+      warning?: string;
     };
 
 const PORTFOLIO_SUGGESTIONS = [
@@ -60,7 +64,8 @@ export function ChatUI({
   const abortRef = useRef<AbortController | null>(null);
 
   const suggestions = useMemo(
-    () => (scope === "portfolio" ? PORTFOLIO_SUGGESTIONS : tickerSuggestions(scope)),
+    () =>
+      scope === "portfolio" ? PORTFOLIO_SUGGESTIONS : tickerSuggestions(scope),
     [scope],
   );
 
@@ -101,44 +106,62 @@ export function ChatUI({
     const controller = new AbortController();
     abortRef.current = controller;
 
-    await streamChat(text, conversationId, scope, controller.signal, (event, data) => {
-      setMessages((current) =>
-        current.map((m) => {
-          if (m.id !== assistantId || m.role !== "assistant") return m;
+    await streamChat(
+      text,
+      conversationId,
+      scope,
+      controller.signal,
+      (event, data) => {
+        setMessages((current) =>
+          current.map((m) => {
+            if (m.id !== assistantId || m.role !== "assistant") return m;
 
-          switch (event) {
-            case "meta": {
-              if (data.conversationId && !conversationId) {
-                setConversationId(data.conversationId);
+            switch (event) {
+              case "meta": {
+                if (data.conversationId && !conversationId) {
+                  setConversationId(data.conversationId);
+                }
+                return m;
               }
-              return m;
+              case "text":
+                return { ...m, text: m.text + data.delta };
+              case "tool_call":
+                return {
+                  ...m,
+                  tools: [
+                    ...m.tools,
+                    { id: data.id, name: data.name, status: "calling" },
+                  ],
+                };
+              case "tool_result":
+                return {
+                  ...m,
+                  tools: m.tools.map((t) =>
+                    t.id === data.id
+                      ? { ...t, status: data.isError ? "error" : "done" }
+                      : t,
+                  ),
+                };
+              case "done":
+                return { ...m, streaming: false };
+              case "warning":
+                return {
+                  ...m,
+                  warning: String(data.reason ?? "Stream ended unexpectedly."),
+                };
+              case "error":
+                return {
+                  ...m,
+                  streaming: false,
+                  error: String(data.error ?? "Error"),
+                };
+              default:
+                return m;
             }
-            case "text":
-              return { ...m, text: m.text + data.delta };
-            case "tool_call":
-              return {
-                ...m,
-                tools: [...m.tools, { id: data.id, name: data.name, status: "calling" }],
-              };
-            case "tool_result":
-              return {
-                ...m,
-                tools: m.tools.map((t) =>
-                  t.id === data.id
-                    ? { ...t, status: data.isError ? "error" : "done" }
-                    : t,
-                ),
-              };
-            case "done":
-              return { ...m, streaming: false };
-            case "error":
-              return { ...m, streaming: false, error: String(data.error ?? "Error") };
-            default:
-              return m;
-          }
-        }),
-      );
-    });
+          }),
+        );
+      },
+    );
 
     abortRef.current = null;
     setPending(false);
@@ -185,8 +208,7 @@ export function ChatUI({
 
       <form
         onSubmit={handleSubmit}
-        className="border-t border-border bg-bg px-6 py-4"
-      >
+        className="border-t border-border bg-bg px-6 py-4">
         <div className="mx-auto flex max-w-3xl items-end gap-3">
           <div className="flex-1 rounded-[20px] border border-border bg-panel px-4 py-3 transition-colors focus-within:border-brand">
             <textarea
@@ -197,7 +219,8 @@ export function ChatUI({
               placeholder="Ask about your portfolio…"
               disabled={pending}
               rows={1}
-              className="block w-full resize-none bg-transparent text-[15px] leading-relaxed text-text outline-none placeholder:text-muted disabled:cursor-not-allowed"
+              className="block w-full resize-none bg-transparent text-[15px] leading-relaxed text-text outline-none ring-0 focus:outline-none focus:ring-0 active:outline-none active:ring-0 placeholder:text-muted disabled:cursor-not-allowed"
+              style={{ outline: "none", boxShadow: "none" }}
             />
           </div>
           {pending ? (
@@ -205,8 +228,7 @@ export function ChatUI({
               type="button"
               onClick={stop}
               className="flex h-[46px] w-[46px] shrink-0 items-center justify-center rounded-full bg-panel-2 text-text transition-colors hover:bg-pill"
-              aria-label="Stop generating"
-            >
+              aria-label="Stop generating">
               <StopIcon />
             </button>
           ) : (
@@ -214,8 +236,7 @@ export function ChatUI({
               type="submit"
               disabled={!input.trim()}
               className="flex h-[46px] w-[46px] shrink-0 items-center justify-center rounded-full bg-gradient-to-r from-brand to-brand-3 text-white transition-[filter] hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
-              aria-label="Send"
-            >
+              aria-label="Send">
               <SendIcon />
             </button>
           )}
@@ -257,8 +278,7 @@ function EmptyState({
             key={s}
             type="button"
             onClick={() => onPick(s)}
-            className="rounded-card border border-border bg-panel px-4 py-3 text-[14px] font-medium text-soft transition-colors hover:bg-panel-2"
-          >
+            className="rounded-card border border-border bg-panel px-4 py-3 text-[14px] font-medium text-soft transition-colors hover:bg-panel-2">
             {s}
           </button>
         ))}
@@ -293,7 +313,9 @@ function MessageRow({ message }: { message: DisplayMessage }) {
           ))}
         </div>
       ) : null}
-      {message.streaming && message.text === "" && message.tools.length === 0 ? (
+      {message.streaming &&
+      message.text === "" &&
+      message.tools.length === 0 ? (
         <div className="text-[15px] text-muted">Thinking…</div>
       ) : message.text.length > 0 ? (
         <div className="relative">
@@ -301,6 +323,11 @@ function MessageRow({ message }: { message: DisplayMessage }) {
           {message.streaming ? (
             <span className="ml-0.5 inline-block h-[16px] w-[2px] translate-y-[3px] animate-pulse bg-text" />
           ) : null}
+        </div>
+      ) : null}
+      {message.warning ? (
+        <div className="rounded-[10px] border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
+          ⚠ {message.warning}
         </div>
       ) : null}
       {message.error ? (
@@ -321,9 +348,14 @@ function ToolChip({ tool }: { tool: ToolUse }) {
           : tool.status === "error"
             ? "border-danger/40 bg-danger/10 text-danger"
             : "border-border bg-panel text-muted"
-      }`}
-    >
-      {tool.status === "calling" ? <DotLoader /> : tool.status === "error" ? "✗" : "✓"}
+      }`}>
+      {tool.status === "calling" ? (
+        <DotLoader />
+      ) : tool.status === "error" ? (
+        "✗"
+      ) : (
+        "✓"
+      )}
       <span className="font-mono">{tool.name}</span>
     </div>
   );
@@ -349,7 +381,15 @@ function StopIcon() {
 
 function SendIcon() {
   return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg
+      width="18"
+      height="18"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round">
       <path d="M12 19V5" />
       <path d="m5 12 7-7 7 7" />
     </svg>

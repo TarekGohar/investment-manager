@@ -44,6 +44,13 @@ export class OpenAiCompatibleProvider implements AiProvider {
           tools: oaiTools,
           stream: true,
           stream_options: { include_usage: true },
+          // Temperature 0.6 strikes a balance: PM-grade calls still have
+          // variety, but at the default 1.0 gpt-4o occasionally produces
+          // garbage tokens (CJK chars mid-English-sentence) when the
+          // context includes structured data + tool results. Capping
+          // max_tokens prevents runaway generation if it does happen.
+          temperature: 0.6,
+          max_tokens: 2000,
         },
         signal ? { signal } : undefined,
       );
@@ -91,6 +98,7 @@ export class OpenAiCompatibleProvider implements AiProvider {
           finalToolCalls,
           usage: lastUsage,
           model,
+          finishReason,
         };
         return;
       }

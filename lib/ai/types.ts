@@ -42,6 +42,15 @@ export type StreamEvent =
       finalToolCalls: ToolCall[];
       usage?: TokenUsage;
       model?: string;
+      /**
+       * OpenAI / Azure OpenAI `finish_reason` from the final chunk.
+       * Values: "stop" (clean), "length" (hit max_tokens), "tool_calls"
+       * (handed off to tools — provider keeps looping), "content_filter"
+       * (Azure safety system intervened — output may be garbled or
+       * truncated). Useful for surfacing to the user when output looks
+       * broken.
+       */
+      finishReason?: string;
     }
   | { type: "error"; error: string };
 
