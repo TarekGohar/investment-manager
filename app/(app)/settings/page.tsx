@@ -5,7 +5,7 @@ import Link from "next/link";
 import { Topbar } from "@/components/topbar";
 import { SignOutButton } from "@/components/sign-out-button";
 import { BrokeragesSection } from "@/components/brokerages-section";
-import { MailgunTestButton } from "@/components/mailgun-test-button";
+import { EmailTestButton } from "@/components/email-test-button";
 import { PreferencesSection } from "@/components/preferences-section";
 import { TaxProfileSection } from "@/components/tax-profile-section";
 import { PerformanceProfileSection } from "@/components/performance-profile-section";
@@ -16,7 +16,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { getThemeFromCookie } from "@/lib/theme";
 import { getModel, getProviderName } from "@/lib/ai";
-import { mailgunStatus } from "@/lib/mailgun";
+import { emailStatus } from "@/lib/email";
 import { getUserPreferences } from "@/lib/preferences";
 
 const PROVIDER_LABEL: Record<string, string> = {
@@ -44,7 +44,7 @@ export default async function SettingsPage() {
 
   const provider = getProviderName();
   const model = getModel();
-  const mg = mailgunStatus();
+  const mg = emailStatus();
 
   return (
     <>
@@ -164,7 +164,7 @@ export default async function SettingsPage() {
 
           <Section
             title="Email"
-            description="Mailgun is used for magic-link sign-in and alert digests. Without it, the app falls back to logging emails in the dev console."
+            description="Resend powers magic-link sign-in and alert digests. Without RESEND_API_KEY, the app prints emails to the dev console instead."
             defaultOpen
           >
             <Row label="Status">
@@ -180,21 +180,16 @@ export default async function SettingsPage() {
                     mg.configured ? "bg-success" : "bg-muted-2"
                   }`}
                 />
-                {mg.configured ? "Mailgun configured" : "Console fallback"}
+                {mg.configured ? "Resend configured" : "Console fallback"}
               </span>
             </Row>
-            {mg.domain ? (
-              <Row label="Domain">
-                <span className="font-mono text-[14px]">{mg.domain}</span>
-              </Row>
-            ) : null}
             {mg.from ? (
               <Row label="From">
                 <span className="font-mono text-[14px]">{mg.from}</span>
               </Row>
             ) : null}
             <div className="mt-3 flex justify-end">
-              <MailgunTestButton configured={mg.configured} />
+              <EmailTestButton configured={mg.configured} />
             </div>
           </Section>
 

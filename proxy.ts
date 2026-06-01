@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getSessionCookie } from "better-auth/cookies";
 
 const PUBLIC_PATHS = new Set<string>(["/sign-in"]);
-const PUBLIC_PREFIXES = ["/api/auth"];
+const PUBLIC_PREFIXES = ["/api/auth", "/api/cron"];
 
 function isPublic(pathname: string): boolean {
   if (PUBLIC_PATHS.has(pathname)) return true;

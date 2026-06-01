@@ -2,7 +2,7 @@ import "server-only";
 import { prisma } from "@/lib/prisma";
 import { getEnrichedPortfolio } from "@/lib/portfolio/queries";
 import { getCandles, getQuotes } from "@/lib/marketdata";
-import { sendAlertDigest } from "@/lib/mailgun";
+import { sendAlertDigest } from "@/lib/email";
 import { getUserPreferences } from "@/lib/preferences";
 import { COOLDOWN_MS_BY_RULE, EVALUATORS } from "./rules";
 import { runTlhWatch } from "@/lib/coaching/tlh-watch";

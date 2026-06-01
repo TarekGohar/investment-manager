@@ -1,6 +1,6 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
-import { sendAlertDigest } from "@/lib/mailgun";
+import { sendAlertDigest } from "@/lib/email";
 import { getUserPreferences } from "@/lib/preferences";
 import type { AlertRule, Prisma } from "@/generated/prisma";
 

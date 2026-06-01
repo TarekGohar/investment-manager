@@ -1,10 +1,10 @@
 "use client";
 
 import { useTransition } from "react";
-import { sendTestEmailAction } from "@/app/actions/mailgun";
+import { sendTestEmailAction } from "@/app/actions/email";
 import { useToast } from "@/components/toast-provider";
 
-export function MailgunTestButton({ configured }: { configured: boolean }) {
+export function EmailTestButton({ configured }: { configured: boolean }) {
   const toast = useToast();
   const [pending, startTransition] = useTransition();
 
@@ -21,7 +21,7 @@ export function MailgunTestButton({ configured }: { configured: boolean }) {
       } else {
         toast({
           title: "Printed to dev console",
-          description: "Mailgun isn't configured — the message went to your server log instead.",
+          description: "Resend isn't configured — the message went to your server log instead.",
           variant: "info",
         });
       }

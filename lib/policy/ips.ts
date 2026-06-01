@@ -109,8 +109,11 @@ export function computeDrift(
   totalMarketValue: number;
   uncategorized: Array<{ ticker: string; marketValue: number }>;
 } {
+  // Always sum CAD-equivalent so drift percentages are apples-to-apples
+  // across mixed-currency holdings. Native `h.marketValue` would conflate
+  // USD prices with CAD prices and badly distort the percentage math.
   const totalMarketValue = holdings.reduce(
-    (sum, h) => sum + (h.marketValue ?? h.costBasis),
+    (sum, h) => sum + (h.marketValueCad ?? h.costBasisCad),
     0,
   );
   if (totalMarketValue <= 0) {
@@ -121,7 +124,7 @@ export function computeDrift(
   const uncategorized: Array<{ ticker: string; marketValue: number }> = [];
 
   for (const h of holdings) {
-    const value = h.marketValue ?? h.costBasis;
+    const value = h.marketValueCad ?? h.costBasisCad;
     const category = policy.tickerCategories[h.ticker];
     if (!category) {
       uncategorized.push({ ticker: h.ticker, marketValue: value });
