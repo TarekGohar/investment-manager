@@ -1,7 +1,8 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
 import type { BrokerageKind, Prisma } from "@/generated/prisma";
-import { getCandles, getQuotes } from "@/lib/marketdata";
+import { getCandles, getQuotes, quoteCurrencyForTicker } from "@/lib/marketdata";
+import { getFxRateToCad } from "@/lib/marketdata/fx";
 import { deriveHoldings } from "./holdings";
 import type { Tx } from "./types";
 
@@ -53,6 +54,7 @@ function computeSnapshot(
   asOf: Date,
   transactions: Tx[],
   priceLookup: (ticker: string) => number | null,
+  usdToCadRate: number | null,
 ): PortfolioSnapshotRow {
   const cutoff = asOf.getTime();
   const txnsAsOf = transactions.filter((t) => t.occurredAt.getTime() <= cutoff);
@@ -66,27 +68,51 @@ function computeSnapshot(
   let totalDividends = 0;
 
   for (const h of holdings) {
+    // FX legs:
+    //   quoteCcy → holdingCcy: converts the raw quote (always in security's
+    //     home-exchange currency) into the position's tracking currency.
+    //   holdingCcy → CAD: converts position values to CAD for the snapshot
+    //     totals so cross-currency portfolios aggregate cleanly.
+    const quoteCcy = quoteCurrencyForTicker(h.ticker);
+    const quoteToHolding =
+      quoteCcy === h.currency
+        ? 1
+        : quoteCcy === "USD" && h.currency === "CAD"
+          ? (usdToCadRate ?? 1)
+          : quoteCcy === "CAD" && h.currency === "USD" && usdToCadRate
+            ? 1 / usdToCadRate
+            : 1;
+    const holdingToCad =
+      h.currency === "CAD" ? 1 : h.currency === "USD" ? (usdToCadRate ?? 1) : 1;
+
     const price = priceLookup(h.ticker);
-    const marketValue = price != null ? price * h.quantity : 0;
-    totalCost += h.costBasis;
-    totalMarketValue += marketValue;
-    totalRealized += h.realizedGain;
-    totalDividends += h.totalDividends;
+    const marketValueNative = price != null ? price * quoteToHolding * h.quantity : 0;
+    const marketValueCad = marketValueNative * holdingToCad;
+    const costBasisCad = h.costBasis * holdingToCad;
+    const realizedCad = h.realizedGain * holdingToCad;
+    const dividendsCad = h.totalDividends * holdingToCad;
+
+    totalCost += costBasisCad;
+    totalMarketValue += marketValueCad;
+    totalRealized += realizedCad;
+    totalDividends += dividendsCad;
 
     for (const k of Object.keys(h.byKind) as BrokerageKind[]) {
       const slice = h.byKind[k];
       if (slice.quantity === 0 && slice.costBasis === 0) continue;
-      const sliceMv = price != null ? price * slice.quantity : 0;
+      const sliceMvNative = price != null ? price * quoteToHolding * slice.quantity : 0;
+      const sliceMvCad = sliceMvNative * holdingToCad;
+      const sliceCostCad = slice.costBasis * holdingToCad;
       byKind[k].quantity += slice.quantity;
-      byKind[k].costBasis += slice.costBasis;
-      byKind[k].marketValue += sliceMv;
+      byKind[k].costBasis += sliceCostCad;
+      byKind[k].marketValue += sliceMvCad;
     }
 
     holdingRows.push({
       ticker: h.ticker,
       quantity: h.quantity,
-      costBasis: h.costBasis,
-      marketValue,
+      costBasis: costBasisCad,
+      marketValue: marketValueCad,
     });
   }
 
@@ -116,7 +142,10 @@ export async function writeDailySnapshot(userId: string): Promise<{ written: boo
   const now = new Date();
   const asOf = utcDateOnly(now);
 
-  const row = computeSnapshot(asOf, transactions, priceLookup);
+  // One FX fetch covers all USD-denominated positions for today's snapshot.
+  const usdToCad = (await getFxRateToCad("USD", now))?.rate ?? null;
+
+  const row = computeSnapshot(asOf, transactions, priceLookup, usdToCad);
   await upsertSnapshot(userId, row);
   return { written: true };
 }
@@ -170,7 +199,11 @@ export async function backfillSnapshots(
     if (dow === 0 || dow === 6) continue;
 
     const priceLookup = (t: string) => candlesByTicker.get(t)?.get(iso) ?? null;
-    const row = computeSnapshot(asOf, transactions, priceLookup);
+    // Historical FX rate for this date — uses BoC cache when present,
+    // falls back to today's if the historical date is too old to fetch.
+    // For Canadian-only or USD-only portfolios this is a no-op.
+    const usdToCad = (await getFxRateToCad("USD", asOf))?.rate ?? null;
+    const row = computeSnapshot(asOf, transactions, priceLookup, usdToCad);
 
     // Skip if portfolio not yet opened on this date
     if (row.holdings.length === 0) continue;

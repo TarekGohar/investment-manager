@@ -123,9 +123,18 @@ function formatRebalanceEvent(
     .filter((r) => Math.sign(r.driftPct) === -Math.sign(breach.driftPct))
     .sort((a, b) => Math.abs(b.driftPct) - Math.abs(a.driftPct))[0];
 
+  // Plan direction depends on whether the breached category is over- or
+  // under-weight. Over → trim from it, fund the mirror. Under → buy into
+  // it, funded from the mirror (which by construction is the opposite
+  // sign of drift).
+  const isOverweight = breach.driftPct > 0;
   const plan = mirror
-    ? `Suggested: trim ~${fmt(driftDollars)} from ${breach.category}, add to ${mirror.category} (currently ${mirror.actualPct.toFixed(1)}% vs target ${mirror.targetPct.toFixed(1)}%).`
-    : `Suggested: trim ~${fmt(driftDollars)} from ${breach.category}; no mirror category to fund (cash will rise).`;
+    ? isOverweight
+      ? `Suggested: trim ~${fmt(driftDollars)} from ${breach.category} → add to ${mirror.category} (currently ${mirror.actualPct.toFixed(1)}% vs target ${mirror.targetPct.toFixed(1)}%).`
+      : `Suggested: add ~${fmt(driftDollars)} to ${breach.category} (funded by trimming ${mirror.category}, currently ${mirror.actualPct.toFixed(1)}% vs target ${mirror.targetPct.toFixed(1)}%).`
+    : isOverweight
+      ? `Suggested: trim ~${fmt(driftDollars)} from ${breach.category}; no overweight category to fund the trim into (cash will rise).`
+      : `Suggested: add ~${fmt(driftDollars)} to ${breach.category}; deploy idle cash or trim a smaller category to fund.`;
 
   const message =
     `${breach.category} ${direction}: actual ${breach.actualPct.toFixed(1)}% vs target ${breach.targetPct.toFixed(1)}% ` +
