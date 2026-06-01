@@ -37,6 +37,9 @@ model User {
   investmentPolicy  InvestmentPolicy?
   theses            Thesis[]
   cookieSessions    ExternalCookieSession[]
+  importBatches     ImportBatch[]
+  plannedActions    PlannedAction[]
+  rocAllocations    RoCAllocation[]
 
   @@map("user")
 }
@@ -115,12 +118,35 @@ enum TransactionKind {
   TRANSFER_IN
   TRANSFER_OUT
   /// Cash deposited into the brokerage from an external source (paycheque,
-  /// bank transfer). Used to compute cash balance per account and (in
-  /// future) to drive contribution-room tracking for registered accounts.
+  /// bank transfer). Used to compute cash balance per account and to drive
+  /// contribution-room tracking for registered accounts.
   DEPOSIT
   /// Cash withdrawn from the brokerage to an external destination (bank,
   /// rent payment). Reduces the cash balance.
   WITHDRAWAL
+  /// Spinoff, merger, name change, or redenomination. Structured payload
+  /// in Transaction.corporateActionPayload describes the from-side and
+  /// to-side(s) with cost-basis allocation percentages.
+  CORPORATE_ACTION
+}
+
+/// Why the user sold. Required on SELL rows. Feeds behavioral pattern
+/// detection (panic-sells flagged unless reason is set), TLH planned-action
+/// fulfilment (TLH_HARVEST sells consume the active 30-day window), and the
+/// AI coach (knows when to stay quiet vs follow up).
+enum SellReason {
+  /// IPS drift correction. Trimming an over-weight position.
+  REBALANCE_DRIFT
+  /// Written invalidation criterion was met; thesis is broken.
+  THESIS_INVALIDATED
+  /// Realizing a loss to offset gains (or carry forward).
+  TLH_HARVEST
+  /// Other tax-driven decision (e.g. realize gain before bracket change).
+  TAX_PLANNING
+  /// Need the cash for a non-investment expense.
+  CASH_NEED
+  /// Anything else. Surfaces in behavioral patterns if no other reason fits.
+  DISCRETIONARY
 }
 
 enum BrokerageKind {
@@ -175,6 +201,44 @@ model ContributionRoom {
   @@map("contribution_room")
 }
 
+/// Year-end T3 tax breakdown for a REIT / income trust distribution.
+/// Canadian trusts publish (usually in March of the following year) the
+/// percentage of each year's distributions that was eligible dividend,
+/// non-eligible, interest, return of capital, and capital gain. Without
+/// this breakdown the importer can only flag distributions as the catch-
+/// all FOREIGN/ELIGIBLE/OTHER — not the actual mix.
+///
+/// At year-end the user pastes the trust's breakdown here. The
+/// reclassifyDividendsForYear() helper then rewrites the matching
+/// DIVIDEND rows' `dividendType` and adjusts ACB for the ROC portion.
+///
+/// Percentages are stored as decimals 0–100; sum should be ~100.
+model RoCAllocation {
+  id                       String   @id @default(cuid())
+  userId                   String
+  ticker                   String
+  year                     Int
+  eligibleDividendPct      Decimal  @default(0) @db.Decimal(6, 3)
+  nonEligibleDividendPct   Decimal  @default(0) @db.Decimal(6, 3)
+  interestPct              Decimal  @default(0) @db.Decimal(6, 3)
+  returnOfCapitalPct       Decimal  @default(0) @db.Decimal(6, 3)
+  capitalGainPct           Decimal  @default(0) @db.Decimal(6, 3)
+  /// Whatever T3 line items don't fit cleanly above.
+  otherPct                 Decimal  @default(0) @db.Decimal(6, 3)
+  notes                    String?
+  /// Set when reclassifyDividendsForYear() has run for this allocation.
+  /// Surfaced in the UI so the user knows the math has been applied.
+  appliedAt                DateTime?
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, ticker, year])
+  @@index([userId])
+  @@map("roc_allocation")
+}
+
 model Transaction {
   id          String          @id @default(cuid())
   userId      String
@@ -197,20 +261,79 @@ model Transaction {
   // T1 foreign tax credit. Zero or null otherwise.
   foreignTaxWithheld Decimal? @db.Decimal(18, 4)
   /// Only meaningful for DIVIDEND. Drives T5 export bucketing and which
-  /// marginal rate the after-tax math uses.
+  /// marginal rate the after-tax math uses. RETURN_OF_CAPITAL reduces ACB
+  /// in lib/portfolio/holdings.ts rather than being recorded as income.
   dividendType DividendType?
+  /// CAD-equivalent FX rate at trade date. Populated when `currency != "CAD"`
+  /// from the Bank of Canada Valet API. Required for CAD-denominated cost
+  /// basis on USD/EUR/etc. holdings — without it, year-end tax reconstruction
+  /// is impossible. Nullable so CAD-default rows don't carry redundant 1.0.
+  fxRateToCad  Decimal?        @db.Decimal(18, 8)
+  /// Required on SELL rows. Tags the sell with a reason so the behavioral
+  /// detector knows when to stay quiet (a TLH_HARVEST is not a panic sell)
+  /// and the coach knows when a thesis was retired.
+  reasonCode   SellReason?
+  /// True on BUY rows that represent a dividend reinvestment inside a
+  /// registered account. Excluded from contribution-room math (DRIP'd
+  /// dividends don't consume new room).
+  isDrip       Boolean         @default(false)
+  /// Set when this row was created by a CSV import. Lets the user roll back
+  /// a botched import in one click. Null for hand-entered rows.
+  importBatchId String?
+  /// For GIC / bond rows: maturity date. UI shows a countdown so the user
+  /// can decide whether to roll over before maturity. Doesn't affect ACB.
+  maturesAt   DateTime?
+  /// For CORPORATE_ACTION rows. Shape:
+  ///   { event: "SPINOFF"|"MERGER"|"NAME_CHANGE"|"REDENOMINATION",
+  ///     legs: [{ ticker, ratio, basisAllocationPct }], notes }
+  ///  - SPINOFF: parent ticker on the Transaction.ticker; legs list new
+  ///    children; basisAllocationPct must sum to ≤ 100 (remainder stays
+  ///    with the parent).
+  ///  - MERGER: legs list the surviving ticker(s); 100% basis flows out
+  ///    of parent into the survivor pool.
+  ///  - NAME_CHANGE / REDENOMINATION: 1-leg case, all qty & cost transfer.
+  corporateActionPayload Json?
   occurredAt  DateTime
   note        String?
   // For SPLIT only: new shares per old share (e.g. 2 for a 2-for-1).
   splitRatio  Decimal?        @db.Decimal(10, 4)
   createdAt   DateTime        @default(now())
 
-  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  brokerage Brokerage @relation(fields: [brokerageId], references: [id], onDelete: Cascade)
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  brokerage   Brokerage    @relation(fields: [brokerageId], references: [id], onDelete: Cascade)
+  importBatch ImportBatch? @relation(fields: [importBatchId], references: [id], onDelete: SetNull)
 
   @@index([userId, ticker, occurredAt])
   @@index([userId, occurredAt])
+  @@index([importBatchId])
   @@map("transaction")
+}
+
+/// One row per CSV upload. Lets us audit and roll back a botched import as
+/// a unit. Rollback = delete every Transaction with this row's id.
+model ImportBatch {
+  id               String   @id @default(cuid())
+  userId           String
+  /// Brokerage these rows were assigned to at import time. Stored by id for
+  /// stable rollback even if the brokerage is renamed.
+  brokerageId      String
+  /// "RBC_DI" for now; future brokers add their own keys.
+  source           String   @default("RBC_DI")
+  /// Original filename from the upload (display only).
+  sourceFilename   String
+  /// How many Transaction rows this batch created (post-skip).
+  transactionCount Int      @default(0)
+  /// How many rows in the source CSV were skipped (duplicates, unmapped).
+  skippedCount     Int      @default(0)
+  /// Free-form notes from the importer ("3 rows had unmapped 'FXEXCHG' actions").
+  notes            String?
+  importedAt       DateTime @default(now())
+
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions Transaction[]
+
+  @@index([userId, importedAt(sort: Desc)])
+  @@map("import_batch")
 }
 
 // ─── Market data cache (Phase 3) ──────────────────────────────────────
@@ -283,6 +406,23 @@ model Candle {
   @@map("candle")
 }
 
+/// CAD-denominated FX rate cache, keyed by (currency, calendar date UTC).
+/// Populated on-demand by lib/marketdata/fx.ts from the Bank of Canada Valet
+/// API. Historical rates never change so cached rows are valid forever.
+/// `asOf` is the actual BoC observation date used (may be earlier than the
+/// requested date on weekends/holidays).
+model FxRate {
+  currency  String
+  date      DateTime @db.Date
+  rate      Decimal  @db.Decimal(18, 8)
+  asOf      DateTime @db.Date
+  source    String   @default("BOC_VALET")
+  fetchedAt DateTime @default(now())
+
+  @@id([currency, date])
+  @@map("fx_rate")
+}
+
 // ─── Alerts ────────────────────────────────────────────────────────────
 
 enum AlertRule {
@@ -293,6 +433,16 @@ enum AlertRule {
   MA_CROSS_200
   VOLUME_SPIKE
   NEWS_MATERIAL
+  /// Non-reg holding has dropped > thresholdPct below ACB AND there's no
+  /// active superficial-loss window AND no open PlannedAction yet. The alert
+  /// names the loss size, estimated tax saving, and a replacement candidate.
+  TLH_OPPORTUNITY
+  /// Any IPS category has been outside drift threshold for ≥ N consecutive
+  /// trading days. Alert suggests trim/buy plan respecting account types.
+  REBALANCE_DUE
+  /// A new filing's summary suggests the user's stated invalidation criteria
+  /// for an active thesis may be met. Wired in Session 5.
+  THESIS_INVALIDATION_CANDIDATE
 }
 
 enum NewsSeverity {
@@ -348,6 +498,54 @@ model AlertEvent {
   @@index([userId, read])
   @@index([alertId, ticker, firedAt(sort: Desc)])
   @@map("alert_event")
+}
+
+enum PlannedActionKind {
+  /// User intends to harvest a loss on `ticker`. payload contains
+  /// replacement-ETF candidate + estimated tax saving. Window auto-arms
+  /// against re-buying the same ticker for 30 days. Fulfilled when a SELL
+  /// with reasonCode=TLH_HARVEST on this ticker lands.
+  TLH_HARVEST
+  /// User intends to rebalance per a suggested plan. payload holds the
+  /// per-leg trim/buy quantities. Fulfilled when corresponding trades land.
+  REBALANCE
+  /// User intends to reconsider a thesis after AI flagged invalidation.
+  /// Fulfilled when Thesis.status changes off ACTIVE.
+  THESIS_REEVALUATION
+}
+
+/// Tracks an action the user has *stated intent* to perform after responding
+/// to a coaching alert. The platform never executes for the user — it just
+/// remembers the plan so it can (a) keep the relevant alert quiet while the
+/// plan is open, (b) auto-fulfill when the matching transaction is recorded,
+/// (c) warn at entry time if the user is about to violate the plan (e.g.
+/// re-buying a TLH-harvested ticker within the 30-day window).
+model PlannedAction {
+  id           String            @id @default(cuid())
+  userId       String
+  kind         PlannedActionKind
+  ticker       String?
+  /// Kind-specific payload — e.g. for TLH_HARVEST:
+  /// `{ replacementTicker, lossAmount, taxSaving, brokerageId }`.
+  payload      Json
+  /// When this intent was registered (typically when the alert email's
+  /// "mark as planned" link was clicked).
+  plannedAt    DateTime          @default(now())
+  /// When the plan should be considered abandoned if not fulfilled. For
+  /// TLH_HARVEST, this is the 30-day window expiry. Null = no auto-expiry.
+  expiresAt    DateTime?
+  /// Set when a matching transaction lands.
+  fulfilledAt  DateTime?
+  /// Set when the user explicitly dismisses without acting.
+  dismissedAt  DateTime?
+  /// Optional reference to the originating alert event for audit.
+  sourceAlertEventId String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, fulfilledAt, dismissedAt])
+  @@index([userId, ticker, kind])
+  @@map("planned_action")
 }
 
 // ─── Watchlist ─────────────────────────────────────────────────────────
@@ -408,6 +606,10 @@ enum AnalysisKind {
   WEEKLY
   ON_ALERT
   QUARTERLY_DEEP
+  /// Once-a-year roll-up: every active thesis re-validated, IPS drift
+  /// review, realized P&L summary, TLH used/missed, year-end housekeeping.
+  /// Generated on-demand from the /annual-review page.
+  ANNUAL_REVIEW
 }
 
 enum FilingType {
@@ -555,6 +757,15 @@ model Thesis {
   /// Markdown body of the most recent AI re-check ("is thesis still intact?")
   lastAiReview        String?
   lastReviewedAt      DateTime?
+  /// When the filings-driven invalidation check last ran for this thesis.
+  /// Distinct from lastReviewedAt (which is on-demand "re-check thesis").
+  lastInvalidationCheckAt    DateTime?
+  /// 0–100 confidence that the latest filing meets the invalidation
+  /// criteria. ≥ 60 triggers the THESIS_INVALIDATION_CANDIDATE alert.
+  lastInvalidationConfidence Int?
+  /// Markdown explaining which criterion triggered and the supporting
+  /// excerpt from the filing summary. Surfaced on the thesis card.
+  lastInvalidationReasoning  String?
   createdAt           DateTime     @default(now())
   updatedAt           DateTime     @updatedAt
 

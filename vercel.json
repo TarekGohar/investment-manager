@@ -1,20 +1,17 @@
 {
+  "//": "Cadence philosophy: this is a buy-and-hold portfolio. We refresh, classify, and alert once per weekday at market close (21:00 UTC ≈ 17:00 ET, after US close). Snapshot follows at 21:30 UTC after quotes are warm. Filings pull overnight (05:30 UTC). Weekly review is the deep cadence (Sunday 13:00 UTC). Daily review is ON-DEMAND only — a button on the dashboard, not a cron — because a static portfolio produces near-identical EOD reviews day after day. Email digests only fire for material events (see lib/preferences silentUnlessMaterial).",
   "crons": [
     {
       "path": "/api/cron/refresh-quotes",
-      "schedule": "*/30 * * * *"
+      "schedule": "0 21 * * 1-5"
     },
     {
       "path": "/api/cron/classify-news",
-      "schedule": "15 * * * *"
+      "schedule": "5 21 * * 1-5"
     },
     {
       "path": "/api/cron/run-alerts",
-      "schedule": "2,32 * * * *"
-    },
-    {
-      "path": "/api/cron/daily-review",
-      "schedule": "15 21 * * 1-5"
+      "schedule": "10 21 * * 1-5"
     },
     {
       "path": "/api/cron/weekly-review",

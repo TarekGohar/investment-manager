@@ -6,6 +6,8 @@ import {
   type EdgarFilingListItem,
 } from "@/lib/filings/edgar";
 import { summarizeQuarterly } from "@/lib/ai/filings";
+import { runThesisInvalidationCheck } from "@/lib/coaching/thesis-invalidation";
+import { persistCoachingEvents } from "@/lib/coaching/persist";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -51,6 +53,7 @@ export async function GET(req: Request) {
 
   let filingsIngested = 0;
   let summariesGenerated = 0;
+  let thesisChecksFired = 0;
   const errors: string[] = [];
 
   for (const ticker of allTickers) {
@@ -148,6 +151,39 @@ export async function GET(req: Request) {
             priorFiling: prior && prior.body ? { ...prior, body: prior.body } : null,
           });
           if (id) summariesGenerated++;
+
+          // Thesis-invalidation check: per-summary, scoped to this user.
+          // Reads the summary we just wrote, scans active theses for matches,
+          // fires a coaching alert if confidence is high enough.
+          if (id) {
+            try {
+              const summaryRow = await prisma.aIAnalysis.findUnique({
+                where: { id },
+                select: { body: true },
+              });
+              if (summaryRow?.body) {
+                const fired = await runThesisInvalidationCheck({
+                  ticker,
+                  filingSummary: summaryRow.body,
+                  filingType: item.type,
+                  filedAt: item.filedAt,
+                });
+                // Filter to events for THIS user — runThesisInvalidationCheck
+                // scans theses across all users for the ticker, but inside
+                // this per-user loop we only want to act on this user's.
+                const forUser = fired.filter((e) => e.userId === userId);
+                if (forUser.length > 0) {
+                  await persistCoachingEvents("THESIS_INVALIDATION_CANDIDATE", forUser);
+                  thesisChecksFired += forUser.length;
+                }
+              }
+            } catch (err) {
+              console.error(
+                `[cron/pull-filings] thesis-check ${userId}:${ticker} failed:`,
+                err,
+              );
+            }
+          }
         }
       } catch (err) {
         errors.push(`${ticker}@${item.accessionNumber}: ${(err as Error).message}`);
@@ -160,6 +196,7 @@ export async function GET(req: Request) {
     tickersScanned: allTickers.size,
     filingsIngested,
     summariesGenerated,
+    thesisChecksFired,
     errors,
     at: new Date().toISOString(),
   });

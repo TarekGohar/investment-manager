@@ -23,21 +23,16 @@ const GROUPS: Group[] = [
     label: "AI background jobs",
     items: [
       {
-        key: "aiAutoDailyReview",
-        title: "Auto-generate daily PM review",
-        description:
-          "Run the daily portfolio review at 21:15 UTC on trading days. Skips the AI call (and cost) when off.",
-      },
-      {
         key: "aiAutoWeeklyReview",
         title: "Auto-generate weekly PM review",
-        description: "Run the weekly deep-dive on Sundays at 13:00 UTC.",
+        description:
+          "Run the weekly deep-dive on Sundays at 13:00 UTC. Daily reviews are on-demand (dashboard button) — no cron.",
       },
       {
         key: "aiNewsClassification",
         title: "Classify news with AI",
         description:
-          "Hourly cron tags incoming news as INFO / MATERIAL / CRITICAL so NEWS_MATERIAL alerts can fire.",
+          "Tags incoming news as INFO / MATERIAL / CRITICAL so NEWS_MATERIAL alerts can fire. Runs once per weekday at market close.",
       },
     ],
   },
@@ -49,6 +44,12 @@ const GROUPS: Group[] = [
         title: "Email alert digests",
         description:
           "Master switch for Mailgun digests. Each alert also needs the EMAIL channel enabled.",
+      },
+      {
+        key: "silentUnlessMaterial",
+        title: "Silent unless material",
+        description:
+          "Only email when a material event fires (NEWS_MATERIAL today; thesis-invalidation, IPS drift, and TLH opportunities in upcoming sessions). Low-signal alerts still appear in /alerts but stay out of email. Turn off to email every fired event.",
       },
       {
         key: "showNotificationBadge",

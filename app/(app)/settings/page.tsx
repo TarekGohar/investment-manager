@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
+import Link from "next/link";
 import { Topbar } from "@/components/topbar";
 import { SignOutButton } from "@/components/sign-out-button";
 import { BrokeragesSection } from "@/components/brokerages-section";
@@ -83,6 +84,19 @@ export default async function SettingsPage() {
                 transactionCount: b._count.transactions,
               }))}
             />
+          </Section>
+
+          <Section
+            title="Import transactions"
+            description="Bulk-load an RBC Direct Investing Activity CSV. The importer classifies each row, flags possible duplicates, and auto-fetches CAD-equivalent FX rates."
+            defaultOpen
+          >
+            <Link
+              href="/settings/import"
+              className="inline-flex items-center gap-2 rounded-full bg-pill px-4 py-2 text-[13px] font-semibold text-text transition-colors hover:bg-pill/70"
+            >
+              Open the importer →
+            </Link>
           </Section>
 
           <Section
@@ -185,20 +199,22 @@ export default async function SettingsPage() {
           </Section>
 
           <Section
-            title="Cron"
-            description="Background jobs scheduled by Vercel Cron."
+            title="Background jobs"
+            description="Event-driven cadence for a buy-and-hold portfolio: one consolidated pass at market close, weekly deep cadence on Sunday. Daily review is on-demand, not scheduled."
             defaultOpen
           >
-            <Row label="Refresh quotes">Every 30 minutes</Row>
-            <Row label="Classify news (AI)">Hourly at :15</Row>
-            <Row label="Run alerts">Every 30 minutes (2 min after refresh)</Row>
-            <Row label="Daily PM review">21:15 UTC, Mon–Fri</Row>
+            <Row label="Refresh quotes">21:00 UTC, Mon–Fri (US market close)</Row>
+            <Row label="Classify news (AI)">21:05 UTC, Mon–Fri</Row>
+            <Row label="Run alerts">21:10 UTC, Mon–Fri</Row>
+            <Row label="End-of-day snapshot">21:30 UTC, Mon–Fri</Row>
+            <Row label="Pull filings (EDGAR / SEDAR+)">05:30 UTC, daily</Row>
             <Row label="Weekly PM review">13:00 UTC, Sunday</Row>
+            <Row label="Daily PM review">On-demand (dashboard button)</Row>
             <p className="mt-3 text-xs text-muted-2">
-              Local dev does not run crons — use the manual triggers (e.g. &ldquo;Run now&rdquo;
-              on /alerts and &ldquo;Regenerate&rdquo; on the dashboard PM&apos;s read card).
-              Toggles in <strong>Preferences</strong> above let you disable AI jobs you don&apos;t
-              want running.
+              The daily review used to be a fixed cron at 21:15 UTC weekdays — but on an
+              unchanged buy-and-hold portfolio it produced near-identical output day after day.
+              Pull one when you actually want a snapshot. Local dev never runs crons; use the
+              manual triggers on /alerts and the dashboard.
             </p>
           </Section>
 

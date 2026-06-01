@@ -1,7 +1,8 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
 import type { Transaction, Brokerage } from "@/generated/prisma";
-import { getQuotes } from "@/lib/marketdata";
+import { getQuotes, quoteCurrencyForTicker } from "@/lib/marketdata";
+import { getFxRateToCad } from "@/lib/marketdata/fx";
 import { deriveHoldings, summarize } from "./holdings";
 import type {
   EnrichedHolding,
@@ -23,11 +24,18 @@ function serializeTx(t: TransactionWithBrokerage): Tx {
     ticker: t.ticker,
     kind: t.kind,
     currency: t.currency,
+    fxRateToCad: t.fxRateToCad ? t.fxRateToCad.toNumber() : null,
     quantity: t.quantity.toNumber(),
     price: t.price.toNumber(),
     fees: t.fees.toNumber(),
     foreignTaxWithheld: t.foreignTaxWithheld ? t.foreignTaxWithheld.toNumber() : 0,
     dividendType: t.dividendType,
+    reasonCode: t.reasonCode,
+    isDrip: t.isDrip,
+    corporateActionPayload: (t.corporateActionPayload as
+      | import("@/lib/portfolio/types").CorporateActionPayload
+      | null) ?? null,
+    maturesAt: t.maturesAt,
     occurredAt: t.occurredAt,
     note: t.note,
     splitRatio: t.splitRatio ? t.splitRatio.toNumber() : null,
@@ -99,9 +107,56 @@ export async function getEnrichedPortfolio(userId: string): Promise<EnrichedPort
 
   const quotes = await getQuotes(summary.holdings.map((h) => h.ticker));
 
-  let totalMarketValue = 0;
-  let totalDayChange = 0;
-  let prevDayMarketValue = 0;
+  // Per-position values stay in the position's native currency (USD trades
+  // show USD numbers, CAD trades show CAD numbers). Portfolio-level totals
+  // are converted to CAD using today's BoC rate — that's what RBC and other
+  // Canadian brokerages do on their summary pages. The rate is fetched
+  // once if any non-CAD position exists.
+  const today = new Date();
+  const hasNonCadPosition = summary.holdings.some((h) => h.currency !== "CAD");
+  const hasNonUsdForeign = summary.holdings.some(
+    (h) => h.currency !== "CAD" && h.currency !== "USD",
+  );
+  if (hasNonUsdForeign) {
+    console.warn(
+      "[portfolio] non-USD foreign currencies detected; totals fall back to 1:1 CAD for those — wire FX for them when first needed.",
+    );
+  }
+  const usdToCadRate = hasNonCadPosition
+    ? ((await getFxRateToCad("USD", today))?.rate ?? null)
+    : null;
+
+  /** Convert a per-position amount (in position's native currency) to CAD. */
+  function toCad(amount: number, positionCurrency: string): number {
+    if (positionCurrency === "CAD") return amount;
+    if (positionCurrency === "USD") return amount * (usdToCadRate ?? 1);
+    // Other currencies (EUR/GBP/etc.) — caller emitted warning above.
+    return amount;
+  }
+
+  /**
+   * Bring the quote (always in security's home-exchange currency) into the
+   * position's native currency for per-row display. CAT quote in USD but
+   * position recorded in CAD → multiply by USD→CAD. NFLX quote in USD,
+   * position recorded in USD → factor of 1.
+   */
+  function quoteToPositionFactor(holdingCurrency: string, ticker: string): number {
+    const qc = quoteCurrencyForTicker(ticker);
+    if (qc === holdingCurrency) return 1;
+    if (qc === "USD" && holdingCurrency === "CAD") return usdToCadRate ?? 1;
+    if (qc === "CAD" && holdingCurrency === "USD") {
+      return usdToCadRate ? 1 / usdToCadRate : 1;
+    }
+    return 1;
+  }
+
+  let totalMarketValueCad = 0;
+  let totalCostCad = 0;
+  let totalRealizedCad = 0;
+  let totalDividendsCad = 0;
+  let totalForeignTaxCad = 0;
+  let totalDayChangeCad = 0;
+  let prevDayMarketValueCad = 0;
   let hasAnyQuote = false;
   let latestAsOf: Date | null = null;
 
@@ -111,20 +166,29 @@ export async function getEnrichedPortfolio(userId: string): Promise<EnrichedPort
       hasAnyQuote = true;
       if (!latestAsOf || q.asOf > latestAsOf) latestAsOf = q.asOf;
     }
-    const marketPrice = q?.price ?? null;
+    const factor = quoteToPositionFactor(h.currency, h.ticker);
+    // Native-currency display values (what the per-row UI uses)
+    const marketPrice = q ? q.price * factor : null;
     const marketValue = marketPrice != null ? marketPrice * h.quantity : null;
-    // Unrealized gain is the gap vs total cost basis (non-reg + registered combined).
-    // Tax-relevant unrealized = (marketPrice - ACB) * nonRegQuantity, surfaced in Tax view.
     const unrealized = marketValue != null ? marketValue - h.costBasis : null;
     const unrealizedPct =
       unrealized != null && h.costBasis > 0 ? (unrealized / h.costBasis) * 100 : null;
-    const dayChange = q ? q.change * h.quantity : null;
+    const dayChange = q ? q.change * factor * h.quantity : null;
     const dayChangePct = q?.changePct ?? null;
 
-    if (marketValue != null) totalMarketValue += marketValue;
+    // Per-holding CAD aggregation. Same FX rate used to project both market
+    // value and cost basis, so unrealized in CAD is self-consistent.
+    const marketValueCad = marketValue != null ? toCad(marketValue, h.currency) : null;
+    const costBasisCad = toCad(h.costBasis, h.currency);
+    const unrealizedCad = marketValueCad != null ? marketValueCad - costBasisCad : null;
+    if (marketValueCad != null) totalMarketValueCad += marketValueCad;
+    totalCostCad += costBasisCad;
+    totalRealizedCad += toCad(h.realizedGain, h.currency);
+    totalDividendsCad += toCad(h.totalDividends, h.currency);
+    totalForeignTaxCad += toCad(h.totalForeignTaxWithheld, h.currency);
     if (q && dayChange != null) {
-      totalDayChange += dayChange;
-      prevDayMarketValue += q.prevClose * h.quantity;
+      totalDayChangeCad += toCad(dayChange, h.currency);
+      prevDayMarketValueCad += toCad(q.prevClose * factor * h.quantity, h.currency);
     }
 
     return {
@@ -135,27 +199,30 @@ export async function getEnrichedPortfolio(userId: string): Promise<EnrichedPort
       unrealizedPct,
       dayChange,
       dayChangePct,
+      costBasisCad,
+      marketValueCad,
+      unrealizedCad,
       quoteAsOf: q?.asOf ?? null,
     };
   });
 
-  const totalUnrealized = totalMarketValue - summary.totalCost;
+  const totalUnrealized = totalMarketValueCad - totalCostCad;
   const totalUnrealizedPct =
-    summary.totalCost > 0 ? (totalUnrealized / summary.totalCost) * 100 : 0;
+    totalCostCad > 0 ? (totalUnrealized / totalCostCad) * 100 : 0;
   const totalDayChangePct =
-    prevDayMarketValue > 0 ? (totalDayChange / prevDayMarketValue) * 100 : 0;
+    prevDayMarketValueCad > 0 ? (totalDayChangeCad / prevDayMarketValueCad) * 100 : 0;
 
   return {
     holdings: enriched,
-    totalCost: summary.totalCost,
-    totalMarketValue,
+    totalCost: totalCostCad,
+    totalMarketValue: totalMarketValueCad,
     totalUnrealized,
     totalUnrealizedPct,
-    totalDayChange,
+    totalDayChange: totalDayChangeCad,
     totalDayChangePct,
-    totalRealized: summary.totalRealized,
-    totalDividends: summary.totalDividends,
-    totalForeignTaxWithheld: summary.totalForeignTaxWithheld,
+    totalRealized: totalRealizedCad,
+    totalDividends: totalDividendsCad,
+    totalForeignTaxWithheld: totalForeignTaxCad,
     quoteAsOf: latestAsOf,
     hasAnyQuote,
   };

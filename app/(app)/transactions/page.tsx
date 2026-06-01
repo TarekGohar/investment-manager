@@ -8,9 +8,48 @@ import { TransactionForm } from "@/components/transaction-form";
 import { TransactionsList } from "@/components/transactions-list";
 import { TransactionsIcon } from "@/components/icons";
 
-export default async function TransactionsPage() {
+type SearchParams = Promise<{
+  ticker?: string;
+  brokerageId?: string;
+  kind?: string;
+  quantity?: string;
+}>;
+
+const VALID_FORM_KINDS = new Set([
+  "BUY",
+  "SELL",
+  "DIVIDEND",
+  "SPLIT",
+  "DEPOSIT",
+  "WITHDRAWAL",
+  "TRANSFER_IN",
+  "TRANSFER_OUT",
+]);
+
+export default async function TransactionsPage({
+  searchParams,
+}: {
+  searchParams: SearchParams;
+}) {
   const session = await auth.api.getSession({ headers: await headers() });
   if (!session) redirect("/sign-in");
+
+  const params = await searchParams;
+  const defaultTicker = (params.ticker ?? "").toUpperCase();
+  const defaultBrokerageId = params.brokerageId ?? undefined;
+  const defaultKind =
+    params.kind && VALID_FORM_KINDS.has(params.kind)
+      ? (params.kind as
+          | "BUY"
+          | "SELL"
+          | "DIVIDEND"
+          | "SPLIT"
+          | "DEPOSIT"
+          | "WITHDRAWAL"
+          | "TRANSFER_IN"
+          | "TRANSFER_OUT")
+      : undefined;
+  const defaultQuantity = params.quantity ? Number(params.quantity) : undefined;
 
   const [transactions, brokerages] = await Promise.all([
     listTransactions(session.user.id),
@@ -35,7 +74,13 @@ export default async function TransactionsPage() {
 
         <aside className="w-full lg:w-[400px] lg:shrink-0">
           <div className="lg:sticky lg:top-[96px]">
-            <TransactionForm brokerages={brokerages} />
+            <TransactionForm
+              brokerages={brokerages}
+              defaultTicker={defaultTicker}
+              defaultBrokerageId={defaultBrokerageId}
+              defaultKind={defaultKind}
+              defaultQuantity={Number.isFinite(defaultQuantity) ? defaultQuantity : undefined}
+            />
           </div>
         </aside>
       </div>

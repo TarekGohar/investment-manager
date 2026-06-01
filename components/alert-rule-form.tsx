@@ -69,6 +69,11 @@ const SCOPE_FOR_RULE: Record<AlertRule, AlertScope[]> = {
   MA_CROSS_200: ["HOLDING", "TICKER"],
   VOLUME_SPIKE: ["HOLDING", "TICKER"],
   NEWS_MATERIAL: ["HOLDING", "TICKER"],
+  // Platform-driven coaching rules — not user-configurable but listed here
+  // so the type is exhaustive. The alert-rule form filters them out.
+  TLH_OPPORTUNITY: ["PORTFOLIO"],
+  REBALANCE_DUE: ["PORTFOLIO"],
+  THESIS_INVALIDATION_CANDIDATE: ["HOLDING"],
 };
 
 const inputClass =

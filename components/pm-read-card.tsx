@@ -46,13 +46,13 @@ export function PMReadCard({
 
   if (!hasHoldings) {
     return (
-      <section className="mb-[26px] rounded-card border border-border bg-panel px-6 py-[22px]">
+      <section className="rounded-card border border-border bg-panel px-6 py-[22px]">
         <div className="mb-3 flex items-baseline justify-between">
           <h3 className="text-[16px] font-semibold">PM&apos;s read</h3>
         </div>
         <p className="text-sm leading-relaxed text-muted">
-          Record your first buy and an AI portfolio review will start landing here after each
-          market close.
+          Record your first transaction and you&apos;ll be able to generate a portfolio review
+          here on demand.
         </p>
       </section>
     );
@@ -60,22 +60,22 @@ export function PMReadCard({
 
   if (!review) {
     return (
-      <section className="mb-[26px] rounded-card border border-border bg-panel px-6 py-[22px]">
+      <section className="rounded-card border border-border bg-panel px-6 py-[22px]">
         <div className="mb-3 flex items-baseline justify-between">
           <h3 className="text-[16px] font-semibold">PM&apos;s read</h3>
-          <button
-            type="button"
-            onClick={regenerate}
-            disabled={pending}
-            className="text-xs font-semibold text-brand-2 hover:underline disabled:opacity-60"
-          >
-            {pending ? "Generating…" : "Generate now"}
-          </button>
         </div>
-        <p className="text-sm leading-relaxed text-muted">
-          No portfolio review yet. The daily cron runs after market close (Mon–Fri); you can also
-          trigger one manually with the link above.
+        <p className="mb-4 text-sm leading-relaxed text-muted">
+          No review generated yet. Reviews are on-demand — pull one when you want a snapshot
+          of where the portfolio stands.
         </p>
+        <button
+          type="button"
+          onClick={regenerate}
+          disabled={pending}
+          className="rounded-[20px] bg-gradient-to-r from-brand to-brand-3 px-5 py-2.5 text-[13px] font-semibold text-white transition-[filter] hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {pending ? "Generating…" : "Generate today’s review"}
+        </button>
       </section>
     );
   }
@@ -90,9 +90,9 @@ export function PMReadCard({
             type="button"
             onClick={regenerate}
             disabled={pending}
-            className="text-xs font-semibold text-brand-2 hover:underline disabled:opacity-60"
+            className="rounded-full bg-pill px-3 py-1 text-xs font-semibold text-text transition-colors hover:bg-pill/70 disabled:opacity-60"
           >
-            {pending ? "Regenerating…" : "Regenerate"}
+            {pending ? "Generating…" : "Refresh"}
           </button>
         </div>
       </div>

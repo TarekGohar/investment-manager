@@ -7,6 +7,8 @@ import { TickerBadge } from "@/components/ticker-badge";
 import { TlhCandidates } from "@/components/tlh-candidates";
 import { ContributionRoomStatusCard } from "@/components/contribution-room-status";
 import { getContributionRoomStatus } from "@/lib/canadian/contribution-room";
+import { RoCAllocationSection } from "@/components/roc-allocation-section";
+import { listRoCAllocations } from "@/lib/canadian/reit-decomposition";
 import { auth } from "@/lib/auth";
 import { getUserPreferences } from "@/lib/preferences";
 import { getEnrichedPortfolio, listTransactions } from "@/lib/portfolio/queries";
@@ -42,7 +44,7 @@ export default async function TaxPage() {
   const portfolio = await getEnrichedPortfolio(session.user.id);
 
   const currentYear = new Date().getUTCFullYear();
-  const [locationOverview, fwtRollups, transactions, preferences, roomStatuses] =
+  const [locationOverview, fwtRollups, transactions, preferences, roomStatuses, rocAllocations] =
     await Promise.all([
       portfolio.holdings.length > 0
         ? analyzePortfolioLocation(portfolio.holdings)
@@ -51,6 +53,7 @@ export default async function TaxPage() {
       listTransactions(session.user.id),
       getUserPreferences(session.user.id),
       getContributionRoomStatus(session.user.id, currentYear),
+      listRoCAllocations(session.user.id),
     ]);
 
   const capGainsRate = preferences.taxProfile.marginalCapGainsRate;
@@ -119,6 +122,17 @@ export default async function TaxPage() {
 
           {/* Contribution room */}
           <ContributionRoomStatusCard statuses={roomStatuses} year={currentYear} />
+
+          {/* REIT / trust T3 decomposition */}
+          <section className="rounded-card border border-border bg-panel px-4 py-4 md:px-6">
+            <h2 className="mb-3 text-[16px] font-semibold">
+              REIT &amp; trust T3 decomposition
+            </h2>
+            <RoCAllocationSection
+              initial={rocAllocations}
+              currentYear={currentYear}
+            />
+          </section>
 
           {/* Tax-loss harvesting */}
           <TlhCandidates

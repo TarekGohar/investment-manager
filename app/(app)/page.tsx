@@ -7,7 +7,17 @@ import { TickerBadge } from "@/components/ticker-badge";
 import { AllocationDonut } from "@/components/allocation-donut";
 import { PMReadCard } from "@/components/pm-read-card";
 import { PerformanceCard } from "@/components/performance-card";
+import { OpenRecommendationsCard } from "@/components/open-recommendations-card";
+import { CurrencyExposureCard } from "@/components/currency-exposure-card";
+import { DividendForecastCard } from "@/components/dividend-forecast-card";
+import { AttributionCard } from "@/components/attribution-card";
 import { getLatestAnalysis } from "@/lib/ai/reviews";
+import { listOpenRecommendations } from "@/lib/coaching/queries";
+import { computeCurrencyExposure } from "@/lib/portfolio/currency-exposure";
+import { computeDividendForecast } from "@/lib/portfolio/dividend-forecast";
+import { computeAttribution } from "@/lib/portfolio/attribution";
+import { getCashBalances, summarizeCash } from "@/lib/portfolio/cash";
+import { getFxRateToCad } from "@/lib/marketdata/fx";
 import { getPerformanceSummary } from "@/lib/portfolio/performance-summary";
 import { analyzePortfolioLocation } from "@/lib/canadian/location";
 import { LocationBadge } from "@/components/location-badge";
@@ -32,11 +42,14 @@ export default async function DashboardPage() {
   const session = await auth.api.getSession({ headers: await headers() });
   if (!session) redirect("/sign-in");
 
-  const [portfolio, latestReview, preferences] = await Promise.all([
+  const [portfolio, latestReview, preferences, openRecs, cashBalances] = await Promise.all([
     getEnrichedPortfolio(session.user.id),
     getLatestAnalysis(session.user.id, "EOD_DAILY"),
     getUserPreferences(session.user.id),
+    listOpenRecommendations(session.user.id),
+    getCashBalances(session.user.id),
   ]);
+  const cashSummary = summarizeCash(cashBalances);
 
   const performance =
     portfolio.holdings.length > 0
@@ -62,6 +75,27 @@ export default async function DashboardPage() {
   const transactions = await listTransactions(session.user.id);
   const series = investedCapitalSeries([...transactions].reverse());
 
+  // Session 6 forecasting cards — one shared FX fetch covers all three.
+  const hasNonCadHolding = portfolio.holdings.some((h) => h.currency !== "CAD");
+  const hasNonCadCash = Object.keys(cashSummary.totalsByCurrency).some(
+    (c) => c !== "CAD",
+  );
+  const usdToCadRate =
+    hasNonCadHolding || hasNonCadCash
+      ? ((await getFxRateToCad("USD", new Date()))?.rate ?? null)
+      : null;
+  const currencyExposure = computeCurrencyExposure({
+    portfolio,
+    cash: cashSummary,
+    usdToCadRate,
+  });
+  const dividendForecast = computeDividendForecast({
+    portfolio,
+    transactions,
+    usdToCadRate,
+  });
+  const attribution = computeAttribution({ portfolio });
+
   const dayUp = portfolio.totalDayChange >= 0;
   const totalUp = portfolio.totalUnrealized >= 0;
   const heroValue = portfolio.hasAnyQuote ? portfolio.totalMarketValue : portfolio.totalCost;
@@ -73,6 +107,7 @@ export default async function DashboardPage() {
       <div className="flex flex-col gap-6 px-4 pb-12 pt-6 md:px-6 lg:flex-row lg:items-start lg:gap-[34px] lg:px-[34px] lg:pt-[30px] lg:pb-[60px]">
         {/* Main */}
         <section className="min-w-0 lg:flex-1">
+          {openRecs.length > 0 ? <OpenRecommendationsCard items={openRecs} /> : null}
           {/* Hero */}
           <div className="mb-[18px]">
             <div className="mb-[6px] text-[13px] font-medium text-muted">{heroLabel}</div>
@@ -260,8 +295,12 @@ export default async function DashboardPage() {
         </section>
 
         {/* Right rail */}
-        <aside className="w-full lg:w-[400px] lg:shrink-0">
+        <aside className="flex w-full flex-col gap-[26px] lg:w-[400px] lg:shrink-0">
           <PMReadCard initialReview={latestReview} hasHoldings={portfolio.holdings.length > 0} />
+
+          <DividendForecastCard summary={dividendForecast} />
+          <AttributionCard summary={attribution} />
+          <CurrencyExposureCard summary={currencyExposure} />
 
           <section className="rounded-[22px] border border-border bg-panel p-[22px]">
             <h3 className="mb-3 text-[16px] font-semibold">Add a transaction</h3>

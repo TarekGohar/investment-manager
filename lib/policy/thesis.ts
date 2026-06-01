@@ -16,6 +16,10 @@ export type ThesisRecord = {
   status: ThesisStatus;
   lastAiReview: string | null;
   lastReviewedAt: Date | null;
+  /** Most recent filings-driven invalidation check (Session 5). */
+  lastInvalidationCheckAt: Date | null;
+  lastInvalidationConfidence: number | null;
+  lastInvalidationReasoning: string | null;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -219,6 +223,9 @@ function toRecord(row: {
   status: ThesisStatus;
   lastAiReview: string | null;
   lastReviewedAt: Date | null;
+  lastInvalidationCheckAt: Date | null;
+  lastInvalidationConfidence: number | null;
+  lastInvalidationReasoning: string | null;
   createdAt: Date;
   updatedAt: Date;
 }): ThesisRecord {
@@ -232,6 +239,9 @@ function toRecord(row: {
     status: row.status,
     lastAiReview: row.lastAiReview,
     lastReviewedAt: row.lastReviewedAt,
+    lastInvalidationCheckAt: row.lastInvalidationCheckAt,
+    lastInvalidationConfidence: row.lastInvalidationConfidence,
+    lastInvalidationReasoning: row.lastInvalidationReasoning,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };

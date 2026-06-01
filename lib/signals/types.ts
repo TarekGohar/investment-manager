@@ -63,6 +63,9 @@ export const RULE_LABEL: Record<AlertRule, string> = {
   MA_CROSS_200: "200-day MA cross",
   VOLUME_SPIKE: "Volume spike",
   NEWS_MATERIAL: "Material news",
+  TLH_OPPORTUNITY: "Tax-loss harvest opportunity",
+  REBALANCE_DUE: "Rebalance due",
+  THESIS_INVALIDATION_CANDIDATE: "Thesis invalidation candidate",
 };
 
 export const RULE_DESCRIPTION: Record<AlertRule, string> = {
@@ -73,6 +76,11 @@ export const RULE_DESCRIPTION: Record<AlertRule, string> = {
   MA_CROSS_200: "Close crosses the 200-day moving average (either direction)",
   VOLUME_SPIKE: "Today's volume exceeds N× the 30-day average",
   NEWS_MATERIAL: "AI classifies a fresh headline as material or critical",
+  TLH_OPPORTUNITY:
+    "Non-reg holding has a harvestable unrealized loss; platform-suggested",
+  REBALANCE_DUE: "An IPS category has drifted past your threshold for ≥3 days",
+  THESIS_INVALIDATION_CANDIDATE:
+    "A new filing summary may meet your stated invalidation criteria",
 };
 
 export const SCOPE_LABEL: Record<AlertScope, string> = {

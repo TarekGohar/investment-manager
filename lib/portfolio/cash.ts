@@ -57,6 +57,9 @@ export function cashDeltaForTx(tx: Tx): number {
     case "SPLIT":
     case "TRANSFER_IN":
     case "TRANSFER_OUT":
+    case "CORPORATE_ACTION":
+      // Corporate actions carry shares, not cash. Cash-in-lieu of fractional
+      // shares is recorded separately as a small DIVIDEND OTHER.
       return 0;
   }
 }
@@ -126,11 +129,16 @@ export async function getCashBalances(userId: string): Promise<CashBalance[]> {
       ticker: null,
       kind: t.kind,
       currency,
+      fxRateToCad: null,
       quantity: t.quantity.toNumber(),
       price: t.price.toNumber(),
       fees: t.fees.toNumber(),
       foreignTaxWithheld: t.foreignTaxWithheld ? t.foreignTaxWithheld.toNumber() : 0,
       dividendType: null,
+      reasonCode: null,
+      isDrip: false,
+      corporateActionPayload: null,
+      maturesAt: null,
       occurredAt: new Date(),
       note: null,
       splitRatio: null,

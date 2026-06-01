@@ -21,9 +21,24 @@ export type AlertEventItem = {
   read: boolean;
 };
 
+/**
+ * Coaching rules are platform-driven (TLH watcher, rebalance watcher,
+ * thesis-invalidation watcher). They get system Alert rows so events have
+ * something to attach to, but they're not user-configurable — exclude from
+ * the /alerts management UI.
+ */
+const COACHING_RULES = new Set([
+  "TLH_OPPORTUNITY",
+  "REBALANCE_DUE",
+  "THESIS_INVALIDATION_CANDIDATE",
+]);
+
 export async function listAlertsForUser(userId: string): Promise<AlertListItem[]> {
   const rows = await prisma.alert.findMany({
-    where: { userId },
+    where: {
+      userId,
+      rule: { notIn: Array.from(COACHING_RULES) as never[] },
+    },
     orderBy: { createdAt: "asc" },
     include: {
       events: {

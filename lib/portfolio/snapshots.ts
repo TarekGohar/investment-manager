@@ -217,7 +217,14 @@ async function listTransactionsForSnapshot(userId: string): Promise<Tx[]> {
     ticker: t.ticker,
     kind: t.kind,
     currency: t.currency,
+    fxRateToCad: t.fxRateToCad ? t.fxRateToCad.toNumber() : null,
     dividendType: t.dividendType,
+    reasonCode: t.reasonCode,
+    isDrip: t.isDrip,
+    corporateActionPayload: (t.corporateActionPayload as
+      | import("@/lib/portfolio/types").CorporateActionPayload
+      | null) ?? null,
+    maturesAt: t.maturesAt,
     quantity: t.quantity.toNumber(),
     price: t.price.toNumber(),
     fees: t.fees.toNumber(),

@@ -12,6 +12,12 @@ import { getCorrelationMatrix } from "@/lib/portfolio/performance-summary";
 import { CorrelationHeatmap } from "@/components/correlation-heatmap";
 import { getCashBalances, summarizeCash } from "@/lib/portfolio/cash";
 import { CashBalances } from "@/components/cash-balances";
+import { findMissingPositions } from "@/lib/portfolio/missing-positions";
+import { MissingPositionsCard } from "@/components/missing-positions-card";
+import { PortfolioByAccount } from "@/components/portfolio-by-account";
+import { NetWorthCard } from "@/components/net-worth-card";
+import { getFxRateToCad } from "@/lib/marketdata/fx";
+import { prisma } from "@/lib/prisma";
 import { formatCurrency, formatPercent, formatQty, formatSignedCurrency } from "@/lib/format";
 
 export default async function PortfolioPage() {
@@ -19,7 +25,7 @@ export default async function PortfolioPage() {
   if (!session) redirect("/sign-in");
 
   const portfolio = await getEnrichedPortfolio(session.user.id);
-  const [locationOverview, correlation, cashBalances] = await Promise.all([
+  const [locationOverview, correlation, cashBalances, missingPositions, brokerages] = await Promise.all([
     portfolio.holdings.length > 0
       ? analyzePortfolioLocation(portfolio.holdings)
       : Promise.resolve(null),
@@ -27,30 +33,67 @@ export default async function PortfolioPage() {
       ? getCorrelationMatrix(session.user.id)
       : Promise.resolve(null),
     getCashBalances(session.user.id),
+    findMissingPositions(session.user.id),
+    prisma.brokerage.findMany({
+      where: { userId: session.user.id },
+      select: { id: true, name: true, kind: true },
+    }),
   ]);
   const cashSummary = summarizeCash(cashBalances);
+  const brokerageInfo = brokerages.map((b) => ({
+    brokerageId: b.id,
+    brokerageName: b.name,
+    brokerageKind: b.kind,
+  }));
+
+  // CAD-convert cash totals so the net-worth card sums apples-to-apples
+  // with the asset totals. One FX call (cached) covers everything.
+  const cashCurrencies = Object.keys(cashSummary.totalsByCurrency);
+  const needsUsdToCad = cashCurrencies.includes("USD");
+  const usdToCadRate = needsUsdToCad
+    ? ((await getFxRateToCad("USD", new Date()))?.rate ?? null)
+    : null;
+  let cashCad = 0;
+  for (const [ccy, amount] of Object.entries(cashSummary.totalsByCurrency)) {
+    if (ccy === "CAD") cashCad += amount;
+    else if (ccy === "USD" && usdToCadRate) cashCad += amount * usdToCadRate;
+    else cashCad += amount; // fallback for currencies we haven't wired
+  }
 
   if (portfolio.holdings.length === 0) {
     return (
       <>
         <Topbar title="Portfolio" />
-        <div className="px-[34px] pb-[60px] pt-[30px]">
+        <div className="px-4 pb-12 pt-6 md:px-6 lg:px-[34px] lg:pt-[30px] lg:pb-[60px]">
+          {cashCad > 0.005 ? (
+            <NetWorthCard
+              assetsCad={0}
+              cashCad={cashCad}
+              cashByCurrency={cashSummary.totalsByCurrency}
+            />
+          ) : null}
+          <MissingPositionsCard positions={missingPositions} />
           <div className="mx-auto mt-12 max-w-md rounded-card border border-dashed border-border bg-panel/40 p-12 text-center">
             <div className="mx-auto mb-6 flex h-12 w-12 items-center justify-center rounded-full bg-panel-2 text-muted">
               <PortfolioIcon className="h-6 w-6" />
             </div>
-            <h2 className="text-[18px] font-semibold">No holdings yet</h2>
+            <h2 className="text-[18px] font-semibold">
+              {missingPositions.length > 0 ? "No active positions" : "No holdings yet"}
+            </h2>
             <p className="mx-auto mt-2 max-w-sm text-sm leading-relaxed text-muted">
-              Once you record your first buy, this view will show all your positions with live
-              prices, cost basis, realized gains, and dividends.
+              {missingPositions.length > 0
+                ? "Record opening balances for the positions above and they'll appear here."
+                : "Once you record your first buy, this view will show all your positions with live prices, cost basis, realized gains, and dividends."}
             </p>
-            <Link
-              href="/transactions"
-              className="mt-6 inline-flex items-center gap-2 rounded-[28px] bg-gradient-to-r from-brand to-brand-3 px-6 py-3 text-sm font-semibold text-white transition-[filter] hover:brightness-110"
-            >
-              <PlusIcon className="h-4 w-4" />
-              Record transaction
-            </Link>
+            {missingPositions.length === 0 ? (
+              <Link
+                href="/transactions"
+                className="mt-6 inline-flex items-center gap-2 rounded-[28px] bg-gradient-to-r from-brand to-brand-3 px-6 py-3 text-sm font-semibold text-white transition-[filter] hover:brightness-110"
+              >
+                <PlusIcon className="h-4 w-4" />
+                Record transaction
+              </Link>
+            ) : null}
           </div>
         </div>
       </>
@@ -61,26 +104,35 @@ export default async function PortfolioPage() {
     <>
       <Topbar title="Portfolio" />
       <div className="px-4 pb-12 pt-6 md:px-6 lg:px-[34px] lg:pt-[30px] lg:pb-[60px]">
+        <NetWorthCard
+          assetsCad={portfolio.totalMarketValue}
+          cashCad={cashCad}
+          cashByCurrency={cashSummary.totalsByCurrency}
+        />
+
+        <MissingPositionsCard positions={missingPositions} />
+
+        <div className="mb-2 text-xs text-muted-2">All totals below are in CAD-equivalent (today&apos;s BoC rate).</div>
         <div className="mb-8 grid grid-cols-2 gap-3 md:grid-cols-4">
           <Stat
-            label={portfolio.hasAnyQuote ? "Market value" : "Cost basis"}
+            label={portfolio.hasAnyQuote ? "Market value (CAD)" : "Cost basis (CAD)"}
             value={formatCurrency(
               portfolio.hasAnyQuote ? portfolio.totalMarketValue : portfolio.totalCost,
             )}
           />
           <Stat
-            label="Unrealized"
+            label="Unrealized (CAD)"
             value={portfolio.hasAnyQuote ? formatSignedCurrency(portfolio.totalUnrealized) : "—"}
             secondary={portfolio.hasAnyQuote ? formatPercent(portfolio.totalUnrealizedPct) : undefined}
             tone={portfolio.hasAnyQuote ? (portfolio.totalUnrealized >= 0 ? "up" : "down") : undefined}
           />
           <Stat
-            label="Realized P&L"
+            label="Realized P&L (CAD)"
             value={formatSignedCurrency(portfolio.totalRealized)}
             tone={portfolio.totalRealized === 0 ? undefined : portfolio.totalRealized > 0 ? "up" : "down"}
           />
           <Stat
-            label="Dividends received"
+            label="Dividends (CAD)"
             value={formatCurrency(portfolio.totalDividends)}
           />
         </div>
@@ -106,9 +158,15 @@ export default async function PortfolioPage() {
           </div>
 
           {portfolio.holdings.map((h) => {
-            const refValue = h.marketValue ?? h.costBasis;
-            const denom = portfolio.hasAnyQuote ? portfolio.totalMarketValue : portfolio.totalCost;
-            const weight = denom > 0 ? (refValue / denom) * 100 : 0;
+            // Weight: always CAD-on-CAD so cross-currency positions compare
+            // fairly. The displayed Value column stays in the position's
+            // native currency.
+            const refValueCad = h.marketValueCad ?? h.costBasisCad;
+            const denomCad = portfolio.hasAnyQuote
+              ? portfolio.totalMarketValue
+              : portfolio.totalCost;
+            const weight = denomCad > 0 ? (refValueCad / denomCad) * 100 : 0;
+            const refValueNative = h.marketValue ?? h.costBasis;
             const dayUp = (h.dayChangePct ?? 0) >= 0;
             const unrealizedUp = (h.unrealized ?? 0) >= 0;
             const locScore = locationOverview?.byTicker.get(h.ticker)?.worstScore;
@@ -128,7 +186,12 @@ export default async function PortfolioPage() {
                   </div>
                 </div>
                 <div className="text-right text-[14px] tabular-nums">{formatQty(h.quantity)}</div>
-                <div className="text-right text-[14px] tabular-nums">{formatCurrency(h.acb)}</div>
+                <div className="text-right text-[14px] tabular-nums">
+                  {formatCurrency(h.acb)}
+                  <span className="ml-1 text-[10px] font-semibold uppercase text-muted-2">
+                    {h.currency}
+                  </span>
+                </div>
                 <div className="text-right text-[14px] tabular-nums">
                   {h.marketPrice != null ? formatCurrency(h.marketPrice) : "—"}
                 </div>
@@ -140,7 +203,10 @@ export default async function PortfolioPage() {
                   {h.dayChangePct != null ? formatPercent(h.dayChangePct) : "—"}
                 </div>
                 <div className="text-right text-[14px] font-semibold tabular-nums">
-                  {formatCurrency(refValue)}
+                  {formatCurrency(refValueNative)}
+                  <span className="ml-1 text-[10px] font-semibold uppercase text-muted-2">
+                    {h.currency}
+                  </span>
                 </div>
                 <div
                   className={`text-right text-[14px] font-semibold tabular-nums ${
@@ -170,6 +236,12 @@ export default async function PortfolioPage() {
           <p className="mt-4 text-xs text-muted-2">
             Prices as of {portfolio.quoteAsOf.toLocaleString()} · Finnhub (15-min delayed)
           </p>
+        ) : null}
+
+        {portfolio.holdings.length > 0 ? (
+          <div className="mt-[26px]">
+            <PortfolioByAccount portfolio={portfolio} brokerages={brokerageInfo} />
+          </div>
         ) : null}
 
         <div className="mt-[26px]">

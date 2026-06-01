@@ -27,6 +27,19 @@ export function isTradeableTicker(ticker: string | null | undefined): ticker is 
   return /^[A-Z][A-Z0-9.-]{0,15}$/.test(ticker.toUpperCase());
 }
 
+/**
+ * What currency does the quote API return prices in for this ticker?
+ * Canadian-listed names trade in CAD; everything else (naked US tickers,
+ * ADRs, etc.) we treat as USD. This is the same listing-detection logic
+ * we use to route quote requests — if a ticker goes to Finnhub, the
+ * quote is USD; if it goes to TMX or CSE, it's CAD.
+ */
+export function quoteCurrencyForTicker(ticker: string): "USD" | "CAD" {
+  const t = ticker.toUpperCase();
+  if (/\.(TO|V|NE|CN)$/.test(t)) return "CAD";
+  return "USD";
+}
+
 export type { Candle, Fundamentals, NewsItem, Quote } from "./types";
 
 const TTL = {

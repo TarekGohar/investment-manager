@@ -5,10 +5,8 @@ import type {
   PortfolioSummary,
   Tx,
 } from "./types";
-import {
-  detectSuperficialLosses,
-  type SuperficialLossViolation,
-} from "@/lib/canadian/superficial-loss";
+import { detectSuperficialLosses } from "@/lib/canadian/superficial-loss";
+import { expandCorporateActions } from "./corporate-actions";
 
 /**
  * Canadian ACB-aware holding derivation.
@@ -27,6 +25,12 @@ import {
  * can show how a position is distributed across account types.
  */
 export function deriveHoldings(transactions: Tx[]): Holding[] {
+  // Pass 0: expand CORPORATE_ACTION rows into synthetic child-ticker
+  // TRANSFER_IN rows (spinoffs / mergers / name changes). The originals
+  // remain in the stream so the parent ticker's iteration can apply the
+  // basis reduction in the CORPORATE_ACTION switch case.
+  transactions = expandCorporateActions(transactions);
+
   // Pass 1: detect superficial-loss violations across the whole history.
   // Each violation tells us which transaction absorbs the disallowed loss
   // (either remaining shares at the sale, or a specific future BUY).
@@ -74,6 +78,10 @@ export function deriveHoldings(transactions: Tx[]): Holding[] {
     let totalDividends = 0;
     let totalForeignTax = 0;
     let firstOpenAt: Date | null = null;
+    // The position's "accounting currency" — captured from the first
+    // share-affecting tx (BUY or TRANSFER_IN). Drives whether we need to
+    // FX-convert the live market quote.
+    let positionCurrency: string | null = null;
 
     // Per-kind ledger for the byKind breakdown
     const byKind = emptyByKind();
@@ -85,6 +93,7 @@ export function deriveHoldings(transactions: Tx[]): Holding[] {
       switch (tx.kind) {
         case "BUY": {
           if (!firstOpenAt) firstOpenAt = tx.occurredAt;
+          if (!positionCurrency) positionCurrency = tx.currency;
           // If this BUY absorbs a disallowed superficial loss from an earlier
           // SELL, add that amount to its cost basis (CRA-mandated adjustment).
           const absorbedLoss = lossAtBuy.get(tx.id) ?? 0;
@@ -145,11 +154,27 @@ export function deriveHoldings(transactions: Tx[]): Holding[] {
           break;
         }
 
-        case "DIVIDEND":
+        case "DIVIDEND": {
+          // RETURN_OF_CAPITAL is special: CRA treats it as a basis reduction,
+          // not as taxable income. Drop the distribution amount out of the
+          // pool cost basis (per-share ACB falls; share count unchanged) and
+          // do NOT add it to totalDividends. Any FWT still rolls up for
+          // recoverability tracking.
+          if (tx.dividendType === "RETURN_OF_CAPITAL") {
+            if (isNonReg) {
+              nonRegCostBasis = Math.max(0, nonRegCostBasis - tx.price);
+            }
+            if (slice.quantity > 1e-9) {
+              slice.costBasis = Math.max(0, slice.costBasis - tx.price);
+            }
+            totalForeignTax += tx.foreignTaxWithheld;
+            break;
+          }
           // For DIVIDEND, `price` holds the total amount received (gross of FWT).
           totalDividends += tx.price;
           totalForeignTax += tx.foreignTaxWithheld;
           break;
+        }
 
         case "SPLIT": {
           const ratio = tx.splitRatio ?? 1;
@@ -168,12 +193,43 @@ export function deriveHoldings(transactions: Tx[]): Holding[] {
 
         case "TRANSFER_IN": {
           if (!firstOpenAt) firstOpenAt = tx.occurredAt;
+          if (!positionCurrency) positionCurrency = tx.currency;
           const grossCost = tx.quantity * tx.price;
           slice.quantity += tx.quantity;
           slice.costBasis += grossCost;
           if (isNonReg) {
             nonRegQty += tx.quantity;
             nonRegCostBasis += grossCost;
+          }
+          break;
+        }
+
+        case "CORPORATE_ACTION": {
+          // Parent-side effect: SPINOFF removes a slice of cost basis without
+          // changing qty; MERGER / NAME_CHANGE / REDENOMINATION zero out the
+          // parent (qty + cost both transferred to the synthetic TRANSFER_IN
+          // on the child ticker emitted by expandCorporateActions).
+          const payload = tx.corporateActionPayload;
+          if (!payload) break;
+          if (payload.event === "SPINOFF") {
+            const totalPct = payload.legs.reduce((s, l) => s + l.basisAllocationPct, 0);
+            const fraction = Math.max(0, Math.min(1, totalPct / 100));
+            const removeNonReg = nonRegCostBasis * fraction;
+            const removeSlice = slice.costBasis * fraction;
+            if (isNonReg) {
+              nonRegCostBasis -= removeNonReg;
+              if (nonRegCostBasis < 0) nonRegCostBasis = 0;
+            }
+            slice.costBasis -= removeSlice;
+            if (slice.costBasis < 0) slice.costBasis = 0;
+          } else {
+            // MERGER / NAME_CHANGE / REDENOMINATION: parent goes to zero
+            if (isNonReg) {
+              nonRegCostBasis = 0;
+              nonRegQty = 0;
+            }
+            slice.quantity = 0;
+            slice.costBasis = 0;
           }
           break;
         }
@@ -221,6 +277,7 @@ export function deriveHoldings(transactions: Tx[]): Holding[] {
 
     holdings.push({
       ticker,
+      currency: positionCurrency ?? sorted[0].currency ?? "CAD",
       quantity: totalQty,
       costBasis: nonRegCostBasis + regCost,
       nonRegQuantity: nonRegQty,

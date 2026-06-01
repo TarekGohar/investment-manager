@@ -70,6 +70,9 @@ export function ThesisCard({
           status,
           lastAiReview: thesis?.lastAiReview ?? null,
           lastReviewedAt: thesis?.lastReviewedAt ?? null,
+          lastInvalidationCheckAt: thesis?.lastInvalidationCheckAt ?? null,
+          lastInvalidationConfidence: thesis?.lastInvalidationConfidence ?? null,
+          lastInvalidationReasoning: thesis?.lastInvalidationReasoning ?? null,
           createdAt: thesis?.createdAt ?? new Date(),
           updatedAt: new Date(),
         });
@@ -266,6 +269,14 @@ export function ThesisCard({
         </button>
       </div>
 
+      {thesis.lastInvalidationCheckAt ? (
+        <InvalidationVerdict
+          checkedAt={thesis.lastInvalidationCheckAt}
+          confidence={thesis.lastInvalidationConfidence}
+          reasoning={thesis.lastInvalidationReasoning}
+        />
+      ) : null}
+
       {thesis.lastAiReview ? (
         <div className="mt-4 rounded-[10px] border border-border bg-bg/40 p-4">
           <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted">
@@ -277,5 +288,62 @@ export function ThesisCard({
         </div>
       ) : null}
     </section>
+  );
+}
+
+function InvalidationVerdict({
+  checkedAt,
+  confidence,
+  reasoning,
+}: {
+  checkedAt: Date;
+  confidence: number | null;
+  reasoning: string | null;
+}) {
+  const conf = confidence ?? 0;
+  // Three bands: ≥60 fires the alert (danger), 30–59 = noisy signal worth
+  // showing but not alerting (warning), <30 = filing didn't speak to it (muted).
+  const tone =
+    conf >= 60
+      ? {
+          border: "border-danger/40",
+          bg: "bg-danger/10",
+          label: "text-danger",
+          verb: "may meet",
+        }
+      : conf >= 30
+        ? {
+            border: "border-warning/40",
+            bg: "bg-warning/10",
+            label: "text-warning",
+            verb: "partially touches",
+          }
+        : {
+            border: "border-border",
+            bg: "bg-bg/40",
+            label: "text-muted",
+            verb: "didn't address",
+          };
+  const checkedLabel = new Date(checkedAt).toLocaleDateString("en-CA", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+  return (
+    <div className={`mt-4 rounded-[10px] border ${tone.border} ${tone.bg} p-4`}>
+      <div className={`mb-1 flex items-baseline justify-between text-[11px] font-semibold uppercase tracking-wide ${tone.label}`}>
+        <span>Filing verdict · invalidation</span>
+        <span className="font-mono">{conf}% conf</span>
+      </div>
+      <div className="text-[13px] leading-relaxed">
+        Latest filing {tone.verb} your invalidation criteria.
+      </div>
+      {reasoning ? (
+        <div className="mt-2 text-[12px] leading-relaxed text-muted">
+          {reasoning}
+        </div>
+      ) : null}
+      <div className="mt-2 text-[11px] text-muted-2">Checked {checkedLabel}</div>
+    </div>
   );
 }

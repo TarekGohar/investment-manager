@@ -7,6 +7,8 @@ import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { ensureDefaultBrokerage } from "@/lib/portfolio/queries";
+import { getFxRateToCad } from "@/lib/marketdata/fx";
+import { fulfillPlanIfMatchedAction } from "@/app/actions/planned-actions";
 
 function refreshTransactionPaths(ticker: string | null) {
   revalidatePath("/");
@@ -30,6 +32,23 @@ async function resolveCurrency(
     select: { currency: true },
   });
   return (b?.currency ?? "CAD").toUpperCase();
+}
+
+/**
+ * Resolve the CAD-equivalent FX rate for this transaction. Returns null for
+ * CAD rows (no FX needed). For non-CAD rows: honour explicit user override;
+ * otherwise fetch from BoC Valet at trade date. Returns null if BoC fails —
+ * the row still saves; the user can edit later.
+ */
+async function resolveFxRate(
+  currency: string,
+  occurredAt: Date,
+  override: number | undefined,
+): Promise<number | null> {
+  if (currency === "CAD") return null;
+  if (override != null && override > 0) return override;
+  const result = await getFxRateToCad(currency, occurredAt);
+  return result?.rate ?? null;
 }
 
 const Schema = z
@@ -62,6 +81,21 @@ const Schema = z
         "OTHER",
       ])
       .optional(),
+    reasonCode: z
+      .enum([
+        "REBALANCE_DRIFT",
+        "THESIS_INVALIDATED",
+        "TLH_HARVEST",
+        "TAX_PLANNING",
+        "CASH_NEED",
+        "DISCRETIONARY",
+      ])
+      .optional(),
+    fxRateToCad: z.coerce.number().positive().optional(),
+    isDrip: z
+      .union([z.literal("on"), z.literal("true"), z.literal("false"), z.literal("")])
+      .optional()
+      .transform((v) => v === "on" || v === "true"),
     quantity: z.coerce.number().nonnegative().optional(),
     price: z.coerce.number().nonnegative().optional(),
     amount: z.coerce.number().nonnegative().optional(),
@@ -114,6 +148,14 @@ const Schema = z
         ctx.addIssue({ code: "custom", path: ["splitRatio"], message: "Split ratio is required." });
       }
     }
+    if (data.kind === "SELL" && !data.reasonCode) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["reasonCode"],
+        message:
+          "Reason is required on sells — tells the coach when to stay quiet (TLH, rebalance) vs flag a possible mistake (panic sell, abandoned thesis).",
+      });
+    }
   });
 
 export type CreateTxResult =
@@ -162,6 +204,7 @@ export async function createTransactionAction(formData: FormData): Promise<Creat
 
   const effectiveBrokerageId = data.brokerageId ?? brokerageId;
   const currency = await resolveCurrency(effectiveBrokerageId, data.currency);
+  const fxRateToCad = await resolveFxRate(currency, data.occurredAt, data.fxRateToCad);
 
   await prisma.transaction.create({
     data: {
@@ -170,7 +213,10 @@ export async function createTransactionAction(formData: FormData): Promise<Creat
       ticker: data.ticker,
       kind: data.kind,
       currency,
+      fxRateToCad,
       dividendType: data.kind === "DIVIDEND" ? data.dividendType : null,
+      reasonCode: data.kind === "SELL" ? data.reasonCode : null,
+      isDrip: data.kind === "BUY" ? Boolean(data.isDrip) : false,
       quantity: qty,
       price,
       fees: data.fees,
@@ -179,6 +225,16 @@ export async function createTransactionAction(formData: FormData): Promise<Creat
       splitRatio,
     },
   });
+
+  // Best-effort: if this SELL fulfills an open coaching plan, mark the
+  // plan complete so it stops nagging on the dashboard.
+  if (data.kind === "SELL" && data.reasonCode) {
+    await fulfillPlanIfMatchedAction({
+      userId: session.user.id,
+      ticker: data.ticker,
+      reasonCode: data.reasonCode,
+    });
+  }
 
   refreshTransactionPaths(data.ticker);
   return { ok: true };
@@ -232,6 +288,7 @@ export async function updateTransactionAction(
   // If brokerage isn't specified, keep the existing one
   const brokerageId = data.brokerageId ?? (await ensureDefaultBrokerage(session.user.id));
   const currency = await resolveCurrency(brokerageId, data.currency);
+  const fxRateToCad = await resolveFxRate(currency, data.occurredAt, data.fxRateToCad);
 
   await prisma.transaction.update({
     where: { id },
@@ -240,7 +297,10 @@ export async function updateTransactionAction(
       ticker: data.ticker,
       kind: data.kind,
       currency,
+      fxRateToCad,
       dividendType: data.kind === "DIVIDEND" ? data.dividendType : null,
+      reasonCode: data.kind === "SELL" ? data.reasonCode : null,
+      isDrip: data.kind === "BUY" ? Boolean(data.isDrip) : false,
       quantity: qty,
       price,
       fees: data.fees,

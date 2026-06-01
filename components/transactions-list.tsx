@@ -22,6 +22,16 @@ const KIND_BADGE: Record<Tx["kind"], { label: string; tone: string }> = {
   TRANSFER_OUT: { label: "Transfer out", tone: "bg-muted/15 text-muted" },
   DEPOSIT: { label: "Deposit", tone: "bg-success/15 text-success" },
   WITHDRAWAL: { label: "Withdraw", tone: "bg-warning/15 text-warning" },
+  CORPORATE_ACTION: { label: "Corp action", tone: "bg-brand/15 text-brand-2" },
+};
+
+const REASON_PILL: Record<NonNullable<Tx["reasonCode"]>, string> = {
+  REBALANCE_DRIFT: "Rebalance",
+  THESIS_INVALIDATED: "Thesis broken",
+  TLH_HARVEST: "TLH",
+  TAX_PLANNING: "Tax",
+  CASH_NEED: "Cash need",
+  DISCRETIONARY: "Discretionary",
 };
 
 function dateLabel(d: Date) {
@@ -42,9 +52,14 @@ function toEditValues(t: Tx): TransactionFormInitialValues {
   return {
     id: t.id,
     ticker: t.ticker,
-    kind: t.kind,
+    // CORPORATE_ACTION isn't editable via the standard form; fall through
+    // to BUY which lets the user delete the row from the ledger view.
+    kind: t.kind === "CORPORATE_ACTION" ? "BUY" : t.kind,
     currency: t.currency,
+    fxRateToCad: t.fxRateToCad,
     dividendType: t.dividendType,
+    reasonCode: t.reasonCode,
+    isDrip: t.isDrip,
     quantity: t.quantity,
     price: t.price,
     fees: t.fees,
@@ -164,12 +179,36 @@ function Row({ t, onEdit }: { t: Tx; onEdit: () => void }) {
           </div>
         </div>
       )}
-      <div>
+      <div className="flex flex-wrap items-center gap-1">
         <span
           className={`inline-block rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide ${badge.tone}`}
         >
           {badge.label}
         </span>
+        {t.kind === "BUY" && t.isDrip ? (
+          <span
+            title="Dividend reinvestment — doesn't consume new contribution room."
+            className="inline-block rounded-full bg-brand/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-brand-2"
+          >
+            DRIP
+          </span>
+        ) : null}
+        {t.kind === "SELL" && t.reasonCode ? (
+          <span
+            title="Reason recorded at sell time."
+            className="inline-block rounded-full bg-muted/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted"
+          >
+            {REASON_PILL[t.reasonCode]}
+          </span>
+        ) : null}
+        {t.currency !== "CAD" && t.fxRateToCad != null ? (
+          <span
+            title={`CAD-equivalent FX captured at trade date: ${t.fxRateToCad.toFixed(4)}`}
+            className="inline-block rounded-full bg-bg/40 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-2 ring-1 ring-inset ring-border"
+          >
+            {t.currency}
+          </span>
+        ) : null}
       </div>
       <div className="text-right text-[14px] tabular-nums">
         {t.kind === "SPLIT"
