@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { getThemeFromCookie } from "@/lib/theme";
@@ -19,6 +19,23 @@ export const metadata: Metadata = {
     template: "%s · Portfolio",
   },
   description: "Personal investment manager",
+  applicationName: "Portfolio",
+  appleWebApp: {
+    capable: true,
+    title: "Portfolio",
+    statusBarStyle: "black-translucent",
+  },
+  formatDetection: { telephone: false },
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#ffffff" },
+    { media: "(prefers-color-scheme: dark)", color: "#0a0b0d" },
+  ],
 };
 
 export default async function RootLayout({

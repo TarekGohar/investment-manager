@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { generateDailyReviewAction } from "@/app/actions/reviews";
 import { useToast } from "@/components/toast-provider";
 import { Markdown } from "@/components/markdown";
@@ -24,8 +25,9 @@ export function PMReadCard({
   initialReview: { title: string | null; body: string; generatedAt: Date } | null;
   hasHoldings: boolean;
 }) {
+  const router = useRouter();
   const toast = useToast();
-  const [review, setReview] = useState(initialReview);
+  const review = initialReview;
   const [pending, startTransition] = useTransition();
 
   function regenerate() {
@@ -37,10 +39,7 @@ export function PMReadCard({
         return;
       }
       toast({ title: "Review generated", variant: "success" });
-      // Wait a beat then refresh; revalidatePath in the action triggers a server refetch
-      // on next nav. For instant feedback, we could re-fetch via a client action; for now
-      // a soft refresh works.
-      window.location.reload();
+      router.refresh();
     });
   }
 
