@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Term } from "@/components/term";
 import type { MissingPosition } from "@/lib/portfolio/missing-positions";
 
 const KIND_LABEL: Record<string, string> = {
@@ -33,7 +34,7 @@ export function MissingPositionsCard({
       <p className="mb-4 text-sm leading-relaxed text-muted">
         Your CSV recorded dividends on these positions, but never the original
         purchases — those happened before the export window. To make them show
-        up in your portfolio and ACB math, record an opening balance for each.
+        up in your portfolio and <Term>ACB</Term> math, record an opening balance for each.
         The quantity hints are parsed from your most recent dividend
         descriptions.
       </p>

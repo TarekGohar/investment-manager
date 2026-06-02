@@ -2,6 +2,7 @@ import Link from "next/link";
 import type { BrokerageKind } from "@/generated/prisma";
 import type { EnrichedPortfolio } from "@/lib/portfolio/types";
 import { TickerBadge } from "@/components/ticker-badge";
+import { Term } from "@/components/term";
 import {
   formatCurrency,
   formatPercent,
@@ -203,7 +204,7 @@ function AccountSection({ group }: { group: AccountGroup }) {
           {group.hasAnyQuote ? (
             <div>
               <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-2">
-                Unrealized (CAD)
+                <Term>Unrealized</Term> (CAD)
               </div>
               <div
                 className={`text-[14px] font-semibold tabular-nums ${
@@ -221,10 +222,10 @@ function AccountSection({ group }: { group: AccountGroup }) {
           <div className="grid grid-cols-[1.5fr_0.6fr_0.8fr_0.8fr_0.9fr_0.9fr] gap-3 px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-muted md:px-6">
             <div>Ticker</div>
             <div className="text-right">Qty</div>
-            <div className="text-right">Avg cost</div>
+            <div className="text-right"><Term>Avg cost</Term></div>
             <div className="text-right">Price</div>
             <div className="text-right">Value</div>
-            <div className="text-right">Unrealized</div>
+            <div className="text-right"><Term>Unrealized</Term></div>
           </div>
           {group.rows
             .sort(

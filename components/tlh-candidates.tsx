@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { TickerBadge } from "@/components/ticker-badge";
+import { Term } from "@/components/term";
 import { formatCurrency, formatPercent, formatQty } from "@/lib/format";
 import type { TlhCandidate } from "@/lib/canadian/tlh";
 
@@ -14,11 +15,11 @@ export function TlhCandidates({
     return (
       <section className="rounded-card border border-border bg-panel">
         <div className="flex flex-wrap items-baseline justify-between gap-2 px-4 py-5 md:px-6">
-          <h2 className="text-[16px] font-semibold">Tax-loss harvest</h2>
+          <h2 className="text-[16px] font-semibold"><Term term="TLH">Tax-loss harvest</Term></h2>
           <span className="text-xs text-muted">Nothing to harvest</span>
         </div>
         <div className="border-t border-border px-6 py-8 text-center text-sm text-muted">
-          No non-registered positions with meaningful unrealized losses right now.
+          No non-registered positions with meaningful <Term>unrealized</Term> losses right now.
         </div>
       </section>
     );
@@ -33,7 +34,7 @@ export function TlhCandidates({
   return (
     <section className="rounded-card border border-border bg-panel">
       <div className="flex flex-wrap items-baseline justify-between gap-2 px-4 py-5 md:px-6">
-        <h2 className="text-[16px] font-semibold">Tax-loss harvest candidates</h2>
+        <h2 className="text-[16px] font-semibold"><Term term="TLH">Tax-loss harvest</Term> candidates</h2>
         <span className="text-xs text-muted">
           {candidates.length} position{candidates.length === 1 ? "" : "s"}
           {hasMarginalRate ? (
@@ -42,7 +43,7 @@ export function TlhCandidates({
               <span className="font-semibold text-success">
                 {formatCurrency(totalSaving)}
               </span>{" "}
-              potential tax saved at your marginal rate
+              potential tax saved at your <Term term="Marginal rate">marginal rate</Term>
             </>
           ) : null}
         </span>
@@ -50,7 +51,7 @@ export function TlhCandidates({
 
       {!hasMarginalRate ? (
         <div className="border-t border-border bg-warning/5 px-4 py-3 text-xs text-warning md:px-6">
-          Dollar savings are hidden until you set your marginal capital-gains
+          Dollar savings are hidden until you set your <Term term="Marginal rate">marginal</Term> capital-gains
           rate in{" "}
           <Link href="/settings" className="underline">
             Settings → Tax profile
@@ -73,7 +74,7 @@ export function TlhCandidates({
                   <div className="min-w-0">
                     <div className="truncate text-[15px] font-semibold">{c.ticker}</div>
                     <div className="text-xs text-muted">
-                      {formatQty(c.nonRegQuantity)} sh @ ACB {formatCurrency(c.acb)} · now{" "}
+                      {formatQty(c.nonRegQuantity)} sh @ <Term>ACB</Term> {formatCurrency(c.acb)} · now{" "}
                       {formatCurrency(c.currentPrice)} ({formatPercent(lossPct)})
                     </div>
                   </div>
@@ -146,7 +147,7 @@ export function TlhCandidates({
       </div>
 
       <div className="border-t border-border px-4 py-3 text-xs text-muted-2 md:px-6">
-        Total unrealized loss: {formatCurrency(totalLoss)}.
+        Total <Term>unrealized</Term> loss: {formatCurrency(totalLoss)}.
         {hasMarginalRate
           ? " Saving estimates use the marginal capital-gains rate you set in Settings."
           : null}

@@ -1,4 +1,5 @@
 import { formatCurrency, formatPercent } from "@/lib/format";
+import { Term } from "@/components/term";
 import type { DividendForecastSummary } from "@/lib/portfolio/dividend-forecast";
 
 export function DividendForecastCard({ summary }: { summary: DividendForecastSummary }) {
@@ -25,7 +26,7 @@ export function DividendForecastCard({ summary }: { summary: DividendForecastSum
         </div>
         {fwt > 0 ? (
           <div className="text-xs text-muted">
-            less FWT {formatCurrency(fwt)} · net{" "}
+            less <Term>FWT</Term> {formatCurrency(fwt)} · net{" "}
             <span className="font-semibold text-text">{formatCurrency(netAfterFwt)}</span>
           </div>
         ) : null}
@@ -34,8 +35,8 @@ export function DividendForecastCard({ summary }: { summary: DividendForecastSum
       {total > 0 ? (
         <>
           <div className="mb-3 flex h-2 w-full overflow-hidden rounded-full bg-pill">
-            <div className="h-full bg-success" style={{ width: `${shelteredPct}%` }} title="Sheltered (TFSA/RRSP/FHSA)" />
-            <div className="h-full bg-danger" style={{ width: `${taxablePct}%` }} title="Taxable (non-reg)" />
+            <div className="h-full bg-success" style={{ width: `${shelteredPct}%` }} title="Sheltered: in registered accounts (TFSA/RRSP/FHSA) — gains aren't taxed" />
+            <div className="h-full bg-danger" style={{ width: `${taxablePct}%` }} title="Taxable: in a non-registered account — dividends count as income this year" />
           </div>
           <div className="mb-4 grid grid-cols-2 gap-3 text-[12px]">
             <div className="rounded-[8px] bg-bg/40 px-3 py-2">
@@ -86,7 +87,7 @@ export function DividendForecastCard({ summary }: { summary: DividendForecastSum
                   <div>{formatCurrency(r.projectedGrossCad)}</div>
                   {r.projectedFwtCad > 0 ? (
                     <div className="text-[10px] text-warning">
-                      − FWT {formatCurrency(r.projectedFwtCad)}
+                      − <Term>FWT</Term> {formatCurrency(r.projectedFwtCad)}
                     </div>
                   ) : null}
                 </div>

@@ -80,13 +80,18 @@ export async function runThesisInvalidationCheck(args: {
 
     if (!result.matched || result.confidence < FIRE_CONFIDENCE_THRESHOLD) continue;
 
+    // Plain English. The criterionTriggered text is already in the user's
+    // own words (we parroted it from their thesis), so quoting it back
+    // reminds them this isn't a generic flag — it's the line THEY wrote.
     const criterionSnippet = result.criterionTriggered
-      ? `“${result.criterionTriggered.slice(0, 120)}”`
-      : "your invalidation criteria";
+      ? `“${result.criterionTriggered.slice(0, 160)}”`
+      : "one of the conditions you wrote down";
     const message =
-      `${ticker}: latest filing summary may meet ${criterionSnippet} ` +
-      `(${result.confidence}% confidence). ` +
-      `Re-check the thesis on the position page.`;
+      `${ticker}'s latest financial report just came out, and it might hit ` +
+      `the condition you wrote in your investment plan that would make you ` +
+      `want to sell: ${criterionSnippet}. The platform is ` +
+      `${result.confidence}% confident — worth taking 5 minutes to re-read ` +
+      `your thinking on this stock and decide whether to keep holding it.`;
 
     events.push({
       userId: thesis.userId,

@@ -1,4 +1,5 @@
 import { formatCurrency, formatPercent } from "@/lib/format";
+import { Term } from "@/components/term";
 import type { AllocationRow } from "@/lib/policy/ips";
 
 export function DriftTable({
@@ -22,7 +23,7 @@ export function DriftTable({
         {anyTargets && thresholdPct != null ? (
           <span className="text-xs text-muted">
             {exceeded} of {drift.rows.length} categor
-            {drift.rows.length === 1 ? "y" : "ies"} drift &gt; ±
+            {drift.rows.length === 1 ? "y" : "ies"} <Term term="Drift">drift</Term> &gt; ±
             {thresholdPct.toFixed(1)}pp
           </span>
         ) : null}
@@ -30,8 +31,8 @@ export function DriftTable({
 
       {!anyTargets ? (
         <div className="border-t border-border px-6 py-8 text-center text-sm text-muted">
-          No target allocation set. Configure your IPS below to start tracking
-          drift.
+          No target allocation set. Configure your <Term>IPS</Term> below to start tracking
+          <Term term="Drift"> drift</Term>.
         </div>
       ) : (
         <div className="overflow-x-auto">
@@ -40,7 +41,7 @@ export function DriftTable({
               <div>Category</div>
               <div className="text-right">Target</div>
               <div className="text-right">Actual</div>
-              <div className="text-right">Drift</div>
+              <div className="text-right"><Term>Drift</Term></div>
             </div>
             {drift.rows.map((r) => (
               <div
@@ -86,8 +87,8 @@ export function DriftTable({
             )
           </div>
           <div className="mt-1 text-muted">
-            Map these to categories in the IPS editor below to include them in
-            drift calculation:{" "}
+            Map these to categories in the <Term>IPS</Term> editor below to include them in
+            <Term term="Drift"> drift</Term> calculation:{" "}
             <span className="font-mono">
               {drift.uncategorized.map((u) => u.ticker).join(", ")}
             </span>

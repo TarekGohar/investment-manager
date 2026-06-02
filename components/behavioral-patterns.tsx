@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Term } from "@/components/term";
 import type { BehavioralReport } from "@/lib/behavioral/patterns";
 
 const KIND_LABEL = {
@@ -24,7 +25,7 @@ export function BehavioralPatterns({ report }: { report: BehavioralReport }) {
 
       {allDisabled ? (
         <div className="border-t border-border bg-warning/5 px-4 py-6 text-sm text-muted md:px-6">
-          No behavioral checks are configured. Set thresholds in the IPS
+          No behavioral checks are configured. Set thresholds in the <Term>IPS</Term>
           editor below (e.g. &ldquo;flag any SELL after a -15% move in 5
           days&rdquo;). Nothing is assumed.
         </div>

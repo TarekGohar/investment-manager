@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { saveInvestmentPolicyAction } from "@/app/actions/policy";
 import { useToast } from "@/components/toast-provider";
+import { Term } from "@/components/term";
 import type {
   InvestmentPolicyData,
   AllocationMap,
@@ -53,7 +54,7 @@ export function PolicyEditor({
     startTransition(async () => {
       const result = await saveInvestmentPolicyAction(data);
       if (result.ok) {
-        toast({ title: "IPS saved", variant: "success" });
+        toast({ title: "Investment policy saved", variant: "success" });
       } else {
         toast({ title: "Couldn't save", description: result.error, variant: "error" });
       }
@@ -63,7 +64,7 @@ export function PolicyEditor({
   return (
     <section className="rounded-card border border-border bg-panel">
       <div className="flex flex-wrap items-baseline justify-between gap-2 px-4 py-5 md:px-6">
-        <h2 className="text-[16px] font-semibold">IPS configuration</h2>
+        <h2 className="text-[16px] font-semibold"><Term>IPS</Term> configuration</h2>
         <span className="text-xs text-muted">
           Set what you want, leave the rest blank — nothing is assumed.
         </span>
@@ -97,8 +98,8 @@ export function PolicyEditor({
         </Block>
 
         <Block
-          title="Drift threshold for rebalance alerts"
-          help="If actual vs target diverges by more than this (percentage points), drift is flagged. Blank disables the check."
+          title={<><Term>Drift threshold</Term> for rebalance alerts</>}
+          help={<>If actual vs target diverges by more than this (percentage points), <Term term="Drift">drift</Term> is flagged. Blank disables the check.</>}
         >
           <UnitInput value={driftThreshold} onChange={setDriftThreshold} unit="pp" />
         </Block>
@@ -139,7 +140,7 @@ export function PolicyEditor({
 
         <Block
           title="Ticker categorization"
-          help="Map each held ticker to one of your allocation categories above (e.g. 'Equity'). Required for drift calculation to work."
+          help={<>Map each held ticker to one of your allocation categories above (e.g. &lsquo;Equity&rsquo;). Required for <Term term="Drift">drift</Term> calculation to work.</>}
         >
           {tickers.length === 0 ? (
             <p className="text-xs text-muted">No holdings to categorize yet.</p>
@@ -166,7 +167,7 @@ export function PolicyEditor({
           )}
         </Block>
 
-        <Block title="Notes" help="Free-form IPS narrative — risk tolerance, time horizon, exclusions, etc.">
+        <Block title="Notes" help={<>Free-form <Term>IPS</Term> narrative — risk tolerance, time horizon, exclusions, etc.</>}>
           <textarea
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
@@ -183,7 +184,7 @@ export function PolicyEditor({
             disabled={pending}
             className="rounded-[8px] bg-brand px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-50"
           >
-            {pending ? "Saving…" : "Save IPS"}
+            {pending ? "Saving…" : "Save policy"}
           </button>
         </div>
       </div>
@@ -196,8 +197,8 @@ function Block({
   help,
   children,
 }: {
-  title: string;
-  help?: string;
+  title: React.ReactNode;
+  help?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (

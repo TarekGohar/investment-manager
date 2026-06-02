@@ -16,6 +16,7 @@ import { findMissingPositions } from "@/lib/portfolio/missing-positions";
 import { MissingPositionsCard } from "@/components/missing-positions-card";
 import { PortfolioByAccount } from "@/components/portfolio-by-account";
 import { NetWorthCard } from "@/components/net-worth-card";
+import { Term } from "@/components/term";
 import { getFxRateToCad } from "@/lib/marketdata/fx";
 import { prisma } from "@/lib/prisma";
 import { formatCurrency, formatPercent, formatQty, formatSignedCurrency } from "@/lib/format";
@@ -115,19 +116,19 @@ export default async function PortfolioPage() {
         <div className="mb-2 text-xs text-muted-2">All totals below are in CAD-equivalent (today&apos;s BoC rate).</div>
         <div className="mb-8 grid grid-cols-2 gap-3 md:grid-cols-4">
           <Stat
-            label={portfolio.hasAnyQuote ? "Market value (CAD)" : "Cost basis (CAD)"}
+            label={portfolio.hasAnyQuote ? "Market value (CAD)" : <><Term>Cost basis</Term> (CAD)</>}
             value={formatCurrency(
               portfolio.hasAnyQuote ? portfolio.totalMarketValue : portfolio.totalCost,
             )}
           />
           <Stat
-            label="Unrealized (CAD)"
+            label={<><Term>Unrealized</Term> (CAD)</>}
             value={portfolio.hasAnyQuote ? formatSignedCurrency(portfolio.totalUnrealized) : "—"}
             secondary={portfolio.hasAnyQuote ? formatPercent(portfolio.totalUnrealizedPct) : undefined}
             tone={portfolio.hasAnyQuote ? (portfolio.totalUnrealized >= 0 ? "up" : "down") : undefined}
           />
           <Stat
-            label="Realized P&L (CAD)"
+            label={<><Term term="Realized P&L">Realized P&amp;L</Term> (CAD)</>}
             value={formatSignedCurrency(portfolio.totalRealized)}
             tone={portfolio.totalRealized === 0 ? undefined : portfolio.totalRealized > 0 ? "up" : "down"}
           />
@@ -148,11 +149,11 @@ export default async function PortfolioPage() {
           <div className="grid grid-cols-[1.6fr_0.55fr_0.8fr_0.8fr_0.6fr_0.8fr_0.9fr_0.7fr_0.5fr] gap-3 border-t border-border px-4 py-3 text-xs font-semibold uppercase tracking-wide text-muted md:px-6">
             <div>Position</div>
             <div className="text-right">Qty</div>
-            <div className="text-right">ACB</div>
+            <div className="text-right"><Term>Cost/sh</Term></div>
             <div className="text-right">Price</div>
             <div className="text-right">Day</div>
             <div className="text-right">Value</div>
-            <div className="text-right">Unrealized</div>
+            <div className="text-right"><Term>Unrealized</Term></div>
             <div className="text-right">Location</div>
             <div className="text-right">Wt</div>
           </div>
@@ -187,7 +188,7 @@ export default async function PortfolioPage() {
                 </div>
                 <div className="text-right text-[14px] tabular-nums">{formatQty(h.quantity)}</div>
                 <div className="text-right text-[14px] tabular-nums">
-                  {formatCurrency(h.acb)}
+                  {formatCurrency(h.quantity > 0 ? h.costBasis / h.quantity : 0)}
                   <span className="ml-1 text-[10px] font-semibold uppercase text-muted-2">
                     {h.currency}
                   </span>
@@ -264,7 +265,7 @@ function Stat({
   secondary,
   tone,
 }: {
-  label: string;
+  label: React.ReactNode;
   value: string;
   secondary?: string;
   tone?: "up" | "down";

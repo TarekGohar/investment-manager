@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { formatSignedCurrency } from "@/lib/format";
+import { Term } from "@/components/term";
 import type { AttributionSummary, AttributionRow } from "@/lib/portfolio/attribution";
 
 export function AttributionCard({ summary }: { summary: AttributionSummary }) {
@@ -11,7 +12,7 @@ export function AttributionCard({ summary }: { summary: AttributionSummary }) {
     <section className="rounded-card border border-border bg-panel px-6 py-[22px]">
       <div className="mb-3 flex items-baseline justify-between">
         <h3 className="text-[16px] font-semibold">Performance contributors</h3>
-        <span className="text-xs text-muted">Unrealized · CAD</span>
+        <span className="text-xs text-muted"><Term>Unrealized</Term> · CAD</span>
       </div>
 
       {summary.contributors.length > 0 ? (
@@ -41,8 +42,8 @@ export function AttributionCard({ summary }: { summary: AttributionSummary }) {
       ) : null}
 
       <div className="mt-4 border-t border-border pt-3 text-[11px] text-muted-2">
-        Contribution = unrealized / portfolio cost basis. Doesn&apos;t include
-        realized P&amp;L or dividends — see the top stats for those.
+        Contribution = <Term>unrealized</Term> / portfolio <Term>cost basis</Term>. Doesn&apos;t include
+        <Term term="Realized P&L"> realized P&amp;L</Term> or dividends — see the top stats for those.
       </div>
     </section>
   );

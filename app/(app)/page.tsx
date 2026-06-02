@@ -28,6 +28,7 @@ import {
   TransactionsIcon,
 } from "@/components/icons";
 import { auth } from "@/lib/auth";
+import { Term } from "@/components/term";
 import { getEnrichedPortfolio, listTransactions } from "@/lib/portfolio/queries";
 import { investedCapitalSeries } from "@/lib/portfolio/holdings";
 import { getUserPreferences } from "@/lib/preferences";
@@ -153,9 +154,9 @@ export default async function DashboardPage() {
 
           {/* Stats */}
           <div className="mb-[26px] grid grid-cols-2 gap-3 md:grid-cols-4">
-            <StatTile label="Cost basis" value={formatCurrency(portfolio.totalCost)} />
+            <StatTile label={<Term>Cost basis</Term>} value={formatCurrency(portfolio.totalCost)} />
             <StatTile
-              label="Unrealized P&L"
+              label={<Term term="Unrealized P&L">Unrealized P&amp;L</Term>}
               value={
                 portfolio.hasAnyQuote ? formatSignedCurrency(portfolio.totalUnrealized) : "—"
               }
@@ -163,7 +164,7 @@ export default async function DashboardPage() {
               tone={portfolio.hasAnyQuote ? (totalUp ? "up" : "down") : undefined}
             />
             <StatTile
-              label="Realized P&L"
+              label={<Term term="Realized P&L">Realized P&amp;L</Term>}
               value={formatSignedCurrency(portfolio.totalRealized)}
               tone={portfolio.totalRealized === 0 ? undefined : portfolio.totalRealized > 0 ? "up" : "down"}
             />
@@ -199,7 +200,7 @@ export default async function DashboardPage() {
             <section className="mb-[26px] flex flex-wrap items-start justify-between gap-3 rounded-card border border-warning/30 bg-warning/5 px-4 py-4 md:px-6">
               <div className="min-w-0">
                 <div className="flex items-center gap-2 text-[14px] font-semibold text-text">
-                  Asset location costing you{" "}
+                  <Term>Asset location</Term> costing you{" "}
                   <span className="text-warning">
                     {formatCurrency(locationOverview.totalEstimatedBleed)}/yr
                   </span>
@@ -241,7 +242,7 @@ export default async function DashboardPage() {
               <div className="text-right">Price</div>
               <div className="text-right">Day</div>
               <div className="text-right">Market value</div>
-              <div className="text-right">Unrealized</div>
+              <div className="text-right"><Term>Unrealized</Term></div>
             </div>
             {portfolio.holdings.map((h) => {
               const dayUp = (h.dayChangePct ?? 0) >= 0;
@@ -257,7 +258,7 @@ export default async function DashboardPage() {
                     <div className="min-w-0">
                       <div className="truncate text-[15px] font-semibold">{h.ticker}</div>
                       <div className="truncate text-xs text-muted">
-                        ACB {formatCurrency(h.acb)}
+                        <Term>Cost/sh</Term> {formatCurrency(h.quantity > 0 ? h.costBasis / h.quantity : 0)}
                       </div>
                     </div>
                   </div>
@@ -327,7 +328,7 @@ function StatTile({
   secondary,
   tone,
 }: {
-  label: string;
+  label: React.ReactNode;
   value: string;
   secondary?: string;
   tone?: "up" | "down";
@@ -352,7 +353,7 @@ function EmptyDashboard() {
       </div>
       <h2 className="text-[24px] font-semibold leading-tight">Welcome to your portfolio</h2>
       <p className="mx-auto mt-3 max-w-md text-[15px] leading-relaxed text-muted">
-        Record your first buy and we&apos;ll derive holdings, cost basis, realized P&amp;L,
+        Record your first buy and we&apos;ll derive holdings, <Term>cost basis</Term>, <Term term="Realized P&L">realized P&amp;L</Term>,
         and dividends from the ledger. Live prices light up the moment you add a position.
       </p>
       <Link

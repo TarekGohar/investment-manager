@@ -37,6 +37,7 @@ import { getThesis } from "@/lib/policy/thesis";
 import { lookupCik } from "@/lib/filings/edgar";
 import { getFilingsForTicker, getInsiderActivity } from "@/lib/filings";
 import { isNonRegisteredKind } from "@/lib/portfolio/holdings";
+import { Term } from "@/components/term";
 import type { BrokerageKind } from "@/generated/prisma";
 
 const KIND_LABEL: Record<BrokerageKind, string> = {
@@ -127,20 +128,23 @@ export default async function PositionPage({
           <h3 className="mb-4 text-[16px] font-semibold">Your position</h3>
           <div className="grid grid-cols-4 gap-4">
             <PosTile label="Shares" value={formatQty(holding.quantity)} />
-            <PosTile label="ACB" value={formatCurrency(holding.acb)} />
-            <PosTile label="Cost basis" value={formatCurrency(holding.costBasis)} />
+            <PosTile
+              label={<Term>Cost/sh</Term>}
+              value={formatCurrency(holding.quantity > 0 ? holding.costBasis / holding.quantity : 0)}
+            />
+            <PosTile label={<Term>Cost basis</Term>} value={formatCurrency(holding.costBasis)} />
             <PosTile
               label="Market value"
               value={marketValue != null ? formatCurrency(marketValue) : "—"}
             />
             <PosTile
-              label="Unrealized P&L"
+              label={<Term term="Unrealized P&L">Unrealized P&amp;L</Term>}
               value={unrealized != null ? formatSignedCurrency(unrealized) : "—"}
               secondary={unrealizedPct != null ? formatPercent(unrealizedPct) : undefined}
               tone={unrealized == null ? undefined : unrealized >= 0 ? "up" : "down"}
             />
             <PosTile
-              label="Realized P&L"
+              label={<Term term="Realized P&L">Realized P&amp;L</Term>}
               value={
                 holding.realizedGain === 0 ? "—" : formatSignedCurrency(holding.realizedGain)
               }
@@ -227,7 +231,7 @@ export default async function PositionPage({
           <PosTile label="Market cap" value={formatCompactCurrency(fundamentals.marketCap)} />
         ) : null}
         {fundamentals.peTtm != null ? (
-          <PosTile label="P/E (TTM)" value={fundamentals.peTtm.toFixed(1)} />
+          <PosTile label={<><Term>P/E</Term> (TTM)</>} value={fundamentals.peTtm.toFixed(1)} />
         ) : null}
         {fundamentals.dividendYield != null ? (
           <PosTile
@@ -236,7 +240,7 @@ export default async function PositionPage({
           />
         ) : null}
         {fundamentals.beta != null ? (
-          <PosTile label="Beta" value={fundamentals.beta.toFixed(2)} />
+          <PosTile label={<Term>Beta</Term>} value={fundamentals.beta.toFixed(2)} />
         ) : null}
         {fundamentals.fiftyTwoHigh != null ? (
           <PosTile label="52w high" value={formatCurrency(fundamentals.fiftyTwoHigh)} />
@@ -281,10 +285,10 @@ export default async function PositionPage({
     <>
       {/* ACB summary */}
       <section className="mb-[26px] rounded-card border border-border bg-panel px-6 py-[22px]">
-        <h3 className="mb-4 text-[16px] font-semibold">ACB &amp; capital gain</h3>
+        <h3 className="mb-4 text-[16px] font-semibold"><Term>ACB</Term> &amp; <Term term="Capital gain">capital gain</Term></h3>
         <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
           <PosTile
-            label="ACB (non-reg)"
+            label={<><Term>ACB</Term> (non-reg)</>}
             value={
               holding.nonRegQuantity > 0
                 ? `${formatCurrency(holding.acb)}/sh`
@@ -296,11 +300,11 @@ export default async function PositionPage({
             value={formatQty(holding.nonRegQuantity)}
           />
           <PosTile
-            label="Non-reg cost basis"
+            label={<>Non-reg <Term>cost basis</Term></>}
             value={formatCurrency(holding.nonRegCostBasis)}
           />
           <PosTile
-            label="Realized P&L (lifetime)"
+            label={<><Term term="Realized P&L">Realized P&amp;L</Term> (lifetime)</>}
             value={
               holding.realizedGain === 0
                 ? "—"
@@ -315,7 +319,7 @@ export default async function PositionPage({
             }
           />
           <PosTile
-            label="Unrealized cap gain"
+            label={<Term>Unrealized cap gain</Term>}
             value={
               taxableUnrealized != null ? formatSignedCurrency(taxableUnrealized) : "—"
             }
@@ -328,7 +332,7 @@ export default async function PositionPage({
             }
             secondary={
               taxableUnrealized != null
-                ? "non-reg slice × (price − ACB)"
+                ? <>non-reg slice × (price − <Term>ACB</Term>)</>
                 : undefined
             }
           />
@@ -339,7 +343,7 @@ export default async function PositionPage({
                 ? formatSignedCurrency(taxableUnrealizedAfterInclusion)
                 : "—"
             }
-            secondary="taxable portion at disposition"
+            secondary={<>taxable portion at <Term term="Disposition">disposition</Term></>}
             tone={
               taxableUnrealizedAfterInclusion == null
                 ? undefined
@@ -355,7 +359,7 @@ export default async function PositionPage({
             }
           />
           <PosTile
-            label="Foreign tax withheld"
+            label={<Term>Foreign tax withheld</Term>}
             value={
               holding.totalForeignTaxWithheld === 0
                 ? "—"
@@ -503,9 +507,9 @@ function PosTile({
   secondary,
   tone,
 }: {
-  label: string;
+  label: React.ReactNode;
   value: string;
-  secondary?: string;
+  secondary?: React.ReactNode;
   tone?: "up" | "down";
 }) {
   const color = tone === "up" ? "text-success" : tone === "down" ? "text-danger" : "text-text";

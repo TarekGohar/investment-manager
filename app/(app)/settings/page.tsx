@@ -12,6 +12,7 @@ import { PerformanceProfileSection } from "@/components/performance-profile-sect
 import { ContributionRoomSection } from "@/components/contribution-room-section";
 import { listContributionRooms } from "@/lib/canadian/contribution-room";
 import { ChevronDownIcon } from "@/components/icons";
+import { Term } from "@/components/term";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { getThemeFromCookie } from "@/lib/theme";
@@ -109,7 +110,7 @@ export default async function SettingsPage() {
 
           <Section
             title="Tax profile"
-            description="Your combined federal + provincial marginal rates. Used for TLH dollar sizing, after-tax dividend math, and withdrawal analysis. Blank fields stay blank — no defaults assumed."
+            description={<>Your combined federal + provincial <Term term="Marginal rate">marginal rates</Term>. Used for <Term>TLH</Term> dollar sizing, after-tax dividend math, and withdrawal analysis. Blank fields stay blank — no defaults assumed.</>}
             defaultOpen
           >
             <TaxProfileSection initial={preferences.taxProfile} />
@@ -117,7 +118,7 @@ export default async function SettingsPage() {
 
           <Section
             title="Performance profile"
-            description="Benchmark ticker + risk-free rate for TWR-vs-benchmark, beta, and Sharpe. Pick what you actually want to compare against — nothing is assumed."
+            description={<>Benchmark ticker + <Term term="Risk-free rate">risk-free rate</Term> for <Term>TWR</Term>-vs-benchmark, <Term>beta</Term>, and <Term>Sharpe</Term>. Pick what you actually want to compare against — nothing is assumed.</>}
             defaultOpen
           >
             <PerformanceProfileSection initial={preferences.performanceProfile} />
@@ -125,7 +126,7 @@ export default async function SettingsPage() {
 
           <Section
             title="Contribution room"
-            description="TFSA / RRSP / FHSA / RESP room you've entered from your CRA Notice of Assessment. Used by the transaction form and /tax page to warn about over-contributions."
+            description={<><Term>TFSA</Term> / <Term>RRSP</Term> / <Term>FHSA</Term> / RESP room you&apos;ve entered from your CRA Notice of Assessment. Used by the transaction form and /tax page to warn about over-contributions.</>}
             defaultOpen
           >
             <ContributionRoomSection
@@ -241,7 +242,7 @@ function Section({
   defaultOpen = false,
 }: {
   title: string;
-  description?: string;
+  description?: ReactNode;
   children: ReactNode;
   defaultOpen?: boolean;
 }) {

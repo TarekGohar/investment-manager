@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { formatCurrency } from "@/lib/format";
+import { Term } from "@/components/term";
 import type { ContributionRoomStatus, RoomKind } from "@/lib/canadian/contribution-room";
 
 const KIND_LABEL: Record<RoomKind, string> = {
@@ -33,7 +34,7 @@ export function ContributionRoomStatusCard({
           <Link href="/settings" className="underline">
             current-year room
           </Link>{" "}
-          (TFSA, RRSP, FHSA, RESP) from your CRA Notice of Assessment so
+          (<Term>TFSA</Term>, <Term>RRSP</Term>, <Term>FHSA</Term>, RESP) from your CRA Notice of Assessment so
           over-contribution warnings can fire.
         </div>
       ) : (
@@ -51,7 +52,7 @@ export function ContributionRoomStatusCard({
                 key={s.kind}
                 className="grid grid-cols-[0.7fr_1fr_1fr_1fr_1fr] items-center gap-3 border-t border-border px-4 py-3 md:px-6"
               >
-                <div className="text-[14px] font-semibold">{KIND_LABEL[s.kind]}</div>
+                <div className="text-[14px] font-semibold"><Term>{KIND_LABEL[s.kind]}</Term></div>
                 <div className="text-right text-[14px] tabular-nums">
                   {s.roomAvailable == null ? "—" : formatCurrency(s.roomAvailable)}
                 </div>
@@ -87,7 +88,7 @@ export function ContributionRoomStatusCard({
       <p className="border-t border-border px-4 py-3 text-xs text-muted-2 md:px-6">
         Deposited = sum of cash DEPOSIT transactions into that account this
         year. Buys with already-deposited cash don&apos;t use further room,
-        and sells don&apos;t free room (TFSA withdrawals free room next
+        and sells don&apos;t free room (<Term>TFSA</Term> withdrawals free room next
         year, but that should already be reflected in the &ldquo;Room
         available&rdquo; number from your NOA).
       </p>

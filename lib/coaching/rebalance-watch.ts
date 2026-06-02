@@ -114,6 +114,7 @@ function formatRebalanceEvent(
   totalMarketValue: number,
 ): RebalanceFiredEvent {
   const direction = breach.driftPct > 0 ? "overweight" : "underweight";
+  const isOverweight = breach.driftPct > 0;
   const driftDollars = (Math.abs(breach.driftPct) / 100) * totalMarketValue;
 
   // Pair the breach with its mirror category (most-opposite drift) for a
@@ -123,22 +124,21 @@ function formatRebalanceEvent(
     .filter((r) => Math.sign(r.driftPct) === -Math.sign(breach.driftPct))
     .sort((a, b) => Math.abs(b.driftPct) - Math.abs(a.driftPct))[0];
 
-  // Plan direction depends on whether the breached category is over- or
-  // under-weight. Over → trim from it, fund the mirror. Under → buy into
-  // it, funded from the mirror (which by construction is the opposite
-  // sign of drift).
-  const isOverweight = breach.driftPct > 0;
-  const plan = mirror
-    ? isOverweight
-      ? `Suggested: trim ~${fmt(driftDollars)} from ${breach.category} → add to ${mirror.category} (currently ${mirror.actualPct.toFixed(1)}% vs target ${mirror.targetPct.toFixed(1)}%).`
-      : `Suggested: add ~${fmt(driftDollars)} to ${breach.category} (funded by trimming ${mirror.category}, currently ${mirror.actualPct.toFixed(1)}% vs target ${mirror.targetPct.toFixed(1)}%).`
-    : isOverweight
-      ? `Suggested: trim ~${fmt(driftDollars)} from ${breach.category}; no overweight category to fund the trim into (cash will rise).`
-      : `Suggested: add ~${fmt(driftDollars)} to ${breach.category}; deploy idle cash or trim a smaller category to fund.`;
+  // Plain-English message. Percentages in parens for the user who learns
+  // by exposure.
+  const headline = isOverweight
+    ? `You're holding too much in "${breach.category}". You said you wanted ${breach.targetPct.toFixed(0)}% of your portfolio there; right now it's ${breach.actualPct.toFixed(0)}% — ${Math.abs(breach.driftPct).toFixed(0)} percentage points over your goal.`
+    : `You're holding too little in "${breach.category}". You said you wanted ${breach.targetPct.toFixed(0)}% of your portfolio there; right now it's only ${breach.actualPct.toFixed(0)}% — ${Math.abs(breach.driftPct).toFixed(0)} percentage points short of your goal.`;
 
-  const message =
-    `${breach.category} ${direction}: actual ${breach.actualPct.toFixed(1)}% vs target ${breach.targetPct.toFixed(1)}% ` +
-    `(${breach.driftPct > 0 ? "+" : ""}${breach.driftPct.toFixed(1)}pp drift). ${plan}`;
+  const action = mirror
+    ? isOverweight
+      ? `Consider selling about ${fmt(driftDollars)} worth from "${breach.category}" and putting the cash into "${mirror.category}" — you wanted ${mirror.targetPct.toFixed(0)}% there but currently have ${mirror.actualPct.toFixed(0)}%.`
+      : `Consider buying about ${fmt(driftDollars)} more in "${breach.category}", funded by selling some of "${mirror.category}" (which you have ${mirror.actualPct.toFixed(0)}% in, more than your ${mirror.targetPct.toFixed(0)}% goal).`
+    : isOverweight
+      ? `Consider selling about ${fmt(driftDollars)} of your "${breach.category}" holdings. The cash will sit in your account until you decide where to put it next.`
+      : `Consider buying about ${fmt(driftDollars)} more in "${breach.category}", either by using idle cash or by selling something smaller.`;
+
+  const message = `${headline} ${action}`;
 
   return {
     userId,

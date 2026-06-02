@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { Topbar } from "@/components/topbar";
 import { LocationBadge } from "@/components/location-badge";
 import { TickerBadge } from "@/components/ticker-badge";
+import { Term } from "@/components/term";
 import { TlhCandidates } from "@/components/tlh-candidates";
 import { ContributionRoomStatusCard } from "@/components/contribution-room-status";
 import { getContributionRoomStatus } from "@/lib/canadian/contribution-room";
@@ -79,13 +80,13 @@ export default async function TaxPage() {
           {/* Hero stats */}
           <section className="grid grid-cols-2 gap-3 md:grid-cols-4">
             <Stat
-              label="Realized P&L (lifetime)"
+              label={<><Term term="Realized P&L">Realized P&amp;L</Term> (lifetime)</>}
               value={
                 portfolio.totalRealized === 0
                   ? "—"
                   : formatSignedCurrency(portfolio.totalRealized)
               }
-              hint="From non-registered sells, ACB-based"
+              hint={<>From non-registered sells, <Term>ACB</Term>-based</>}
               tone={
                 portfolio.totalRealized === 0
                   ? undefined
@@ -95,11 +96,11 @@ export default async function TaxPage() {
               }
             />
             <Stat
-              label="Unrealized cap gain"
+              label={<><Term>Unrealized cap gain</Term></>}
               value={
                 portfolio.hasAnyQuote ? formatSignedCurrency(taxableUnrealized) : "—"
               }
-              hint="Non-reg slice only · 50% inclusion at disposition"
+              hint={<>Non-reg slice only · 50% inclusion at <Term term="Disposition">disposition</Term></>}
               tone={
                 !portfolio.hasAnyQuote
                   ? undefined
@@ -114,9 +115,9 @@ export default async function TaxPage() {
               hint="All accounts, lifetime"
             />
             <Stat
-              label="Foreign tax withheld"
+              label={<><Term term="Foreign tax withheld">Foreign tax withheld</Term></>}
               value={formatCurrency(portfolio.totalForeignTaxWithheld)}
-              hint="Recoverable on non-reg via T1 FTC"
+              hint={<>Recoverable on non-reg via T1 <Term>FTC</Term></>}
             />
           </section>
 
@@ -126,7 +127,7 @@ export default async function TaxPage() {
           {/* REIT / trust T3 decomposition */}
           <section className="rounded-card border border-border bg-panel px-4 py-4 md:px-6">
             <h2 className="mb-3 text-[16px] font-semibold">
-              REIT &amp; trust T3 decomposition
+              REIT &amp; trust <Term>T3</Term> decomposition
             </h2>
             <RoCAllocationSection
               initial={rocAllocations}
@@ -146,8 +147,8 @@ export default async function TaxPage() {
               <h2 className="text-[16px] font-semibold">Active no-buyback windows</h2>
               <p className="mt-1 text-xs text-muted">
                 Buying these tickers before the window closes will trigger the
-                CRA superficial-loss rule — your realized loss gets disallowed
-                and rolled into the new purchase&apos;s ACB.
+                CRA <Term term="Superficial loss">superficial-loss</Term> rule — your realized loss gets disallowed
+                and rolled into the new purchase&apos;s <Term>ACB</Term>.
               </p>
               <div className="mt-3 space-y-2">
                 {activeWindows.map((w) => (
@@ -185,9 +186,9 @@ export default async function TaxPage() {
             <section className="rounded-card border border-danger/30 bg-danger/5 px-4 py-4 md:px-6">
               <h2 className="text-[16px] font-semibold">Disallowed losses (superficial)</h2>
               <p className="mt-1 text-xs text-muted">
-                These sales triggered the superficial loss rule — the loss was
-                disallowed and rolled into the ACB of substituted shares. Your
-                displayed ACB already reflects this adjustment.
+                These sales triggered the <Term term="Superficial loss">superficial loss</Term> rule — the loss was
+                disallowed and rolled into the <Term>ACB</Term> of substituted shares. Your
+                displayed <Term>ACB</Term> already reflects this adjustment.
               </p>
               <div className="mt-3 space-y-2">
                 {superficialViolations.map((v) => (
@@ -234,7 +235,7 @@ export default async function TaxPage() {
           {/* Asset location overview */}
           <section className="rounded-card border border-border bg-panel">
             <div className="flex flex-wrap items-baseline justify-between gap-2 px-4 py-5 md:px-6">
-              <h2 className="text-[16px] font-semibold">Asset location</h2>
+              <h2 className="text-[16px] font-semibold"><Term>Asset location</Term></h2>
               {locationOverview ? (
                 <span className="text-xs text-muted">
                   {locationOverview.mislocatedCount + locationOverview.suboptimalCount}{" "}
@@ -313,17 +314,17 @@ export default async function TaxPage() {
           {/* FWT history */}
           <section className="rounded-card border border-border bg-panel">
             <div className="flex flex-wrap items-baseline justify-between gap-2 px-4 py-5 md:px-6">
-              <h2 className="text-[16px] font-semibold">Foreign withholding tax</h2>
+              <h2 className="text-[16px] font-semibold"><Term>Foreign withholding tax</Term></h2>
               <span className="text-xs text-muted">Recent 4 years</span>
             </div>
             <div className="overflow-x-auto">
               <div className="min-w-[600px]">
                 <div className="grid grid-cols-[0.6fr_1fr_1fr_1fr_1fr] gap-3 border-t border-border px-4 py-3 text-xs font-semibold uppercase tracking-wide text-muted md:px-6">
                   <div>Year</div>
-                  <div className="text-right">Total FWT</div>
+                  <div className="text-right">Total <Term>FWT</Term></div>
                   <div className="text-right">Recoverable (non-reg)</div>
-                  <div className="text-right">Lost (TFSA/FHSA)</div>
-                  <div className="text-right">RRSP (should be $0)</div>
+                  <div className="text-right">Lost (<Term>TFSA</Term>/<Term>FHSA</Term>)</div>
+                  <div className="text-right"><Term>RRSP</Term> (should be $0)</div>
                 </div>
                 {fwtRollups.length === 0 ? (
                   <div className="border-t border-border px-6 py-8 text-center text-sm text-muted">
@@ -362,9 +363,9 @@ export default async function TaxPage() {
               </div>
             </div>
             <p className="px-4 pb-4 pt-2 text-xs text-muted-2 md:px-6">
-              CRA recovers FWT on non-registered foreign dividends via your T1 foreign
-              tax credit. TFSA/FHSA losses are permanent — the treaty doesn&apos;t
-              recognize them. RRSP should be $0; non-zero means your broker may not
+              CRA recovers <Term>FWT</Term> on non-registered foreign dividends via your T1 foreign
+              tax credit. <Term>TFSA</Term>/<Term>FHSA</Term> losses are permanent — the treaty doesn&apos;t
+              recognize them. <Term>RRSP</Term> should be $0; non-zero means your broker may not
               have W-8BEN on file.
             </p>
           </section>
@@ -377,8 +378,8 @@ export default async function TaxPage() {
             </div>
             <div className="space-y-3 border-t border-border px-4 py-4 md:px-6">
               <SlipRow
-                title="T5-style — investment income"
-                description="Per-ticker dividend + foreign tax withheld summary for your non-registered accounts. Cross-check against the T5 slips your broker issues."
+                title={<><Term>T5</Term>-style — investment income</>}
+                description={<>Per-ticker dividend + foreign tax withheld summary for your non-registered accounts. Cross-check against the <Term>T5</Term> slips your broker issues.</>}
                 downloads={[
                   {
                     label: "Non-registered only",
@@ -391,8 +392,8 @@ export default async function TaxPage() {
                 ]}
               />
               <SlipRow
-                title="T5008-style — dispositions"
-                description="Each SELL in your non-registered accounts with proceeds, ACB, and resulting capital gain or loss. Superficial-loss rows are flagged."
+                title={<><Term>T5008</Term>-style — <Term term="Disposition">dispositions</Term></>}
+                description={<>Each SELL in your non-registered accounts with proceeds, <Term>ACB</Term>, and resulting <Term term="Capital gain">capital gain</Term> or loss. <Term term="Superficial loss">Superficial-loss</Term> rows are flagged.</>}
                 downloads={[
                   {
                     label: "Download",
@@ -428,8 +429,8 @@ function SlipRow({
   description,
   downloads,
 }: {
-  title: string;
-  description: string;
+  title: React.ReactNode;
+  description: React.ReactNode;
   downloads: Array<{ label: string; href: string }>;
 }) {
   return (
@@ -458,9 +459,9 @@ function Stat({
   hint,
   tone,
 }: {
-  label: string;
+  label: React.ReactNode;
   value: string;
-  hint?: string;
+  hint?: React.ReactNode;
   tone?: "up" | "down";
 }) {
   const color = tone === "up" ? "text-success" : tone === "down" ? "text-danger" : "text-text";

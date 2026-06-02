@@ -87,16 +87,23 @@ function formatTlhEvent(userId: string, c: TlhCandidate): TlhFiredEvent {
   const lossSize = Math.abs(c.unrealizedLoss);
   const lossPct = c.acb > 0 ? (c.unrealizedLoss / (c.acb * c.nonRegQuantity)) * 100 : 0;
   const replacement = c.replacements[0];
+
+  // Plain-English: "you bought X for $Y, it's now worth $Z, you could
+  // sell it to claim a tax loss and buy something similar instead."
+  // The "average buying price (called ACB)" pattern teaches vocabulary.
   const savingNote =
     c.estimatedTaxSaving != null
-      ? `est. tax saving ${formatCurrency(c.estimatedTaxSaving)}`
-      : `set your marginal cap-gains rate to see the estimated saving`;
+      ? `If you sold now, you'd save roughly ${formatCurrency(c.estimatedTaxSaving)} on your taxes.`
+      : `To see how much you'd save in taxes, add your marginal capital-gains rate in Settings → Tax profile.`;
+
   const replacementNote = replacement
-    ? `Replacement candidate: ${replacement.ticker} (${replacement.label})`
-    : `No replacement-ETF candidate on file — buying the same ticker within 30 days violates the superficial-loss rule.`;
+    ? `If you want to keep exposure to this kind of investment, you could buy ${replacement.ticker} (${replacement.label}) instead — it's similar enough but counts as a different security for tax purposes, so you can claim the loss.`
+    : `Be careful: if you buy ${c.ticker} back within 30 days you can't claim the loss (a CRA rule called the "superficial loss rule"). You'd need a similar-but-not-identical ETF to replace it.`;
+
   const message =
-    `Harvest candidate: ${c.ticker} is ${formatPercent(lossPct)} below ACB ` +
-    `(${formatCurrency(lossSize)} unrealized loss, ${savingNote}). ${replacementNote}`;
+    `Your ${c.ticker} shares are worth ${Math.abs(lossPct).toFixed(0)}% less than your average buying price (called your ACB). ` +
+    `That's a ${formatCurrency(lossSize)} unrealized loss. Selling those shares would turn that paper loss into a real one you could use to lower your tax bill — this is called "tax-loss harvesting". ` +
+    `${savingNote} ${replacementNote}`;
   return {
     userId,
     ticker: c.ticker,
