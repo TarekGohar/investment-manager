@@ -15,6 +15,8 @@
  * print so dev still works without an account.
  */
 
+import { resolveBaseUrl } from "@/lib/base-url";
+
 type SendParams = {
   to: string;
   subject: string;
@@ -70,7 +72,7 @@ async function send({ to, subject, text, html }: SendParams): Promise<void> {
   }
 }
 
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+const APP_URL = resolveBaseUrl();
 
 // ─── Magic link ───────────────────────────────────────────────────────
 

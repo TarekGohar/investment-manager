@@ -3,8 +3,9 @@ import { prismaAdapter } from "better-auth/adapters/prisma";
 import { magicLink } from "better-auth/plugins";
 import { prisma } from "@/lib/prisma";
 import { sendMagicLinkEmail } from "@/lib/email";
+import { resolveBaseUrl } from "@/lib/base-url";
 
-const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+const appUrl = resolveBaseUrl();
 
 export const auth = betterAuth({
   baseURL: appUrl,
