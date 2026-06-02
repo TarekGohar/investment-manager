@@ -1,9 +1,11 @@
 import { GLOSSARY } from "@/lib/glossary";
+import { InfoTooltip } from "@/components/info-tooltip";
 
 /**
- * Wraps a technical term in `<abbr>` with the plain-English definition
- * shown as a native browser tooltip on hover. Dotted underline signals
- * "hover for more". Zero JS.
+ * Renders a term with a small "i" icon next to it. Hovering or tapping the
+ * icon shows a styled tooltip with the plain-English definition pulled from
+ * `GLOSSARY`. When the term key isn't in the glossary, the children render
+ * plain — never broken layout.
  *
  * Usage:
  *   <Term>ACB</Term>                  // looks up "ACB" in GLOSSARY
@@ -22,16 +24,13 @@ export function Term({
   const key = term ?? (typeof children === "string" ? children : null);
   const definition = key ? lookup(key) : undefined;
   if (!definition) {
-    // Unknown term — render plain so a bad lookup doesn't break layout.
     return <span className={className}>{children}</span>;
   }
   return (
-    <abbr
-      title={definition}
-      className={`cursor-help underline decoration-dotted decoration-muted-2 underline-offset-2 ${className}`}
-    >
-      {children}
-    </abbr>
+    <span className={`inline-flex items-baseline ${className}`}>
+      <span>{children}</span>
+      <InfoTooltip>{definition}</InfoTooltip>
+    </span>
   );
 }
 
