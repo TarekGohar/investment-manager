@@ -29,6 +29,9 @@
     "yahoo-finance2": "^3.14.3",
     "zod": "^4.4.3"
   },
+  "overrides": {
+    "kysely": "0.28.17"
+  },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
