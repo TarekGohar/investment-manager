@@ -53,7 +53,7 @@ export function MobileNav() {
             onClick={() => setOpen(false)}
             aria-hidden="true"
           />
-          <aside className="fixed inset-y-0 left-0 z-50 flex w-[280px] max-w-[85vw] flex-col border-r border-border bg-bg px-4 py-[22px] shadow-2xl">
+          <aside className="fixed inset-y-0 left-0 z-50 flex w-[280px] max-w-[85vw] flex-col border-r border-border bg-bg px-4 pb-[calc(22px+env(safe-area-inset-bottom))] pt-[calc(22px+env(safe-area-inset-top))] shadow-2xl">
             <div className="mb-6 flex items-center justify-between">
               <Link
                 href="/"

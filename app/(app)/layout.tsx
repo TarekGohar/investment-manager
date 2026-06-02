@@ -13,7 +13,9 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     <ToastProvider>
       <div className="flex min-h-screen">
         <Sidebar />
-        <div className="flex min-w-0 flex-1 flex-col">{children}</div>
+        <div className="flex min-w-0 flex-1 flex-col pb-[env(safe-area-inset-bottom)]">
+          {children}
+        </div>
       </div>
     </ToastProvider>
   );

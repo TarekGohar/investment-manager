@@ -30,45 +30,51 @@ export function AlertEventsFeed({ events }: { events: AlertEventItem[] }) {
           When an alert rule fires, the trigger lands here.
         </div>
       ) : (
-        events.map((ev) => (
-          <div
-            key={ev.id}
-            className={`grid grid-cols-[auto_1fr_auto] items-center gap-3 border-t border-border px-4 py-4 md:px-6 ${
-              ev.read ? "" : "bg-brand/[0.03]"
-            }`}
-          >
-            {ev.ticker ? (
-              <Link href={`/positions/${ev.ticker}`}>
+        events.map((ev) => {
+          const inner = (
+            <>
+              {ev.ticker ? (
                 <TickerBadge ticker={ev.ticker} size={36} />
-              </Link>
-            ) : (
-              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-pill text-[11px] font-bold text-muted">
-                P
-              </div>
-            )}
-            <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                {!ev.read ? (
-                  <span className="h-2 w-2 shrink-0 rounded-full bg-brand" aria-label="Unread" />
-                ) : null}
-                <div className="truncate text-[14px] font-semibold text-text">
-                  {ev.message}
+              ) : (
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-pill text-[11px] font-bold text-muted">
+                  P
+                </div>
+              )}
+              <div className="min-w-0 flex-1">
+                <div className="flex items-start gap-2">
+                  {!ev.read ? (
+                    <span
+                      className="mt-[7px] h-2 w-2 shrink-0 rounded-full bg-brand"
+                      aria-label="Unread"
+                    />
+                  ) : null}
+                  <div className="text-[14px] font-semibold leading-snug text-text">
+                    {ev.message}
+                  </div>
+                </div>
+                <div className="mt-1 text-xs text-muted">
+                  {RULE_LABEL[ev.alertRule]} · {timeAgo(ev.firedAt)}
                 </div>
               </div>
-              <div className="mt-1 text-xs text-muted">
-                {RULE_LABEL[ev.alertRule]} · {timeAgo(ev.firedAt)}
-              </div>
+            </>
+          );
+          const baseCls = `flex items-center gap-3 border-t border-border px-4 py-4 md:px-6 ${
+            ev.read ? "" : "bg-brand/[0.03]"
+          }`;
+          return ev.ticker ? (
+            <Link
+              key={ev.id}
+              href={`/positions/${ev.ticker}`}
+              className={`${baseCls} transition-colors hover:bg-hover`}
+            >
+              {inner}
+            </Link>
+          ) : (
+            <div key={ev.id} className={baseCls}>
+              {inner}
             </div>
-            {ev.ticker ? (
-              <Link
-                href={`/positions/${ev.ticker}`}
-                className="text-xs font-semibold text-brand-2 hover:underline"
-              >
-                Open
-              </Link>
-            ) : null}
-          </div>
-        ))
+          );
+        })
       )}
     </div>
   );

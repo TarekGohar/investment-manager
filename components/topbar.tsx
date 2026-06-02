@@ -34,7 +34,7 @@ export async function Topbar({ title, backHref, rightSlot }: TopbarProps) {
   const showBadge = preferences?.showNotificationBadge !== false;
 
   return (
-    <header className="sticky top-0 z-10 flex h-[72px] shrink-0 items-center gap-2 border-b border-border bg-bg px-4 md:gap-3 md:px-6 lg:gap-[18px] lg:px-[26px]">
+    <header className="sticky top-0 z-10 flex h-[calc(72px+env(safe-area-inset-top))] shrink-0 items-center gap-2 border-b border-border bg-bg px-4 pt-[env(safe-area-inset-top)] md:gap-3 md:px-6 lg:gap-[18px] lg:px-[26px]">
       <MobileNav />
 
       {backHref ? (
