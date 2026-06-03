@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { ChatMenu } from "@/components/conversations-sidebar";
 import { SparkleIcon } from "@/components/icons";
 import { Markdown } from "@/components/markdown";
+import type { ConversationSummary } from "@/lib/ai/queries";
 
 type ToolStatus = "calling" | "done" | "error";
 
@@ -47,11 +49,16 @@ export function ChatUI({
   initialMessages,
   initialConversationId,
   scope = "portfolio",
+  conversations,
+  currentId,
 }: {
   initialMessages: DisplayMessage[];
   initialConversationId: string | null;
   /** "portfolio" for the global chat, or a ticker symbol for a per-position chat. */
   scope?: string;
+  /** Recent conversations + active id, surfaced via the mobile chats menu. */
+  conversations: ConversationSummary[];
+  currentId: string | null;
 }) {
   const [messages, setMessages] = useState<DisplayMessage[]>(initialMessages);
   const [conversationId, setConversationId] = useState<string | null>(
@@ -210,6 +217,11 @@ export function ChatUI({
         onSubmit={handleSubmit}
         className="border-t border-border bg-bg px-6 py-4">
         <div className="mx-auto flex max-w-3xl items-end gap-3">
+          <ChatMenu
+            conversations={conversations}
+            currentId={currentId}
+            currentScope={scope}
+          />
           <div className="flex-1 rounded-[20px] border border-border bg-panel px-4 py-3 transition-colors focus-within:border-brand">
             <textarea
               ref={textareaRef}

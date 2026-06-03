@@ -98,7 +98,10 @@ export default async function ChatPage({
         backHref={isPortfolio ? undefined : `/positions/${scope}`}
         rightSlot={
           <div className="flex items-center gap-2">
-            <NewChatButton scope={scope} />
+            {/* New chat lives in the bottom chats menu on mobile. */}
+            <span className="hidden lg:inline-flex">
+              <NewChatButton scope={scope} />
+            </span>
             <ClearChatButton scope={scope} disabled={!hasHistory} />
           </div>
         }
@@ -115,6 +118,8 @@ export default async function ChatPage({
             initialMessages={initialMessages}
             initialConversationId={active?.id ?? null}
             scope={scope}
+            conversations={conversations}
+            currentId={active?.id ?? null}
           />
         </div>
       </div>
