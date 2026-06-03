@@ -19,6 +19,12 @@ import { prisma } from "@/lib/prisma";
 import { getThemeFromCookie } from "@/lib/theme";
 import { getModel, getProviderName } from "@/lib/ai";
 import { getMonthlyTokenUsage, listRecentAiEvents } from "@/lib/ai/queries";
+import {
+  adminApiConfigured,
+  fetchCostReport,
+  groupCostByType,
+  sumCostReport,
+} from "@/lib/ai/anthropic-admin";
 import { emailStatus } from "@/lib/email";
 import { getUserPreferences } from "@/lib/preferences";
 
@@ -32,19 +38,30 @@ export default async function SettingsPage() {
   const session = await auth.api.getSession({ headers: await headers() });
   if (!session) redirect("/sign-in");
 
-  const [brokerages, theme, preferences, contributionRooms, monthlyUsage, recentEvents] =
-    await Promise.all([
-      prisma.brokerage.findMany({
-        where: { userId: session.user.id },
-        orderBy: { createdAt: "asc" },
-        include: { _count: { select: { transactions: true } } },
-      }),
-      getThemeFromCookie(),
-      getUserPreferences(session.user.id),
-      listContributionRooms(session.user.id),
-      getMonthlyTokenUsage(session.user.id),
-      listRecentAiEvents(session.user.id, 50),
-    ]);
+  const [
+    brokerages,
+    theme,
+    preferences,
+    contributionRooms,
+    monthlyUsage,
+    recentEvents,
+    anthropicCostReport,
+  ] = await Promise.all([
+    prisma.brokerage.findMany({
+      where: { userId: session.user.id },
+      orderBy: { createdAt: "asc" },
+      include: { _count: { select: { transactions: true } } },
+    }),
+    getThemeFromCookie(),
+    getUserPreferences(session.user.id),
+    listContributionRooms(session.user.id),
+    getMonthlyTokenUsage(session.user.id),
+    listRecentAiEvents(session.user.id, 50),
+    fetchCostReport(),
+  ]);
+  const anthropicBilledUsd = anthropicCostReport ? sumCostReport(anthropicCostReport) : null;
+  const anthropicByType = anthropicCostReport ? groupCostByType(anthropicCostReport) : [];
+  const adminEnabled = adminApiConfigured();
 
   const currentYear = new Date().getUTCFullYear();
 
@@ -240,11 +257,55 @@ export default async function SettingsPage() {
 
   const usageTab = (
     <>
+      {anthropicBilledUsd != null ? (
+        <Section
+          title="This month · billed by Anthropic"
+          description="Live from the Anthropic Admin API — authoritative spend for your whole organization, cached 5 minutes. Includes every Anthropic call from any source on this key, not just this app."
+        >
+          <Row label="Billed total">
+            <span className="font-semibold tabular-nums">
+              {anthropicBilledUsd.toLocaleString("en-US", {
+                style: "currency",
+                currency: "USD",
+                maximumFractionDigits: 2,
+              })}
+            </span>
+          </Row>
+          {anthropicByType.length > 0 ? (
+            <Row label="By cost type">
+              <div className="flex flex-col items-end gap-1">
+                {anthropicByType.map((row) => (
+                  <div
+                    key={row.costType}
+                    className="flex items-baseline gap-3 text-[13px]"
+                  >
+                    <span className="text-muted">{row.costType.replace(/_/g, " ")}</span>
+                    <span className="tabular-nums">
+                      {row.amountUsd.toLocaleString("en-US", {
+                        style: "currency",
+                        currency: "USD",
+                        maximumFractionDigits: 4,
+                      })}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </Row>
+          ) : null}
+        </Section>
+      ) : null}
+
       <Section
-        title="This month"
-        description="Aggregate spend across every AI surface — chat, daily / weekly reviews, quarterly filing reads, news classification, thesis checks."
+        title={anthropicBilledUsd != null ? "This month · estimated from this app" : "This month"}
+        description={
+          anthropicBilledUsd != null
+            ? "Computed from token counts × per-model pricing. Useful as a per-call breakdown; trust the billed total above for actual spend."
+            : adminEnabled
+              ? "Computed from token counts × per-model pricing. The Anthropic Admin API didn't return data this load — check the server logs."
+              : "Computed from token counts × per-model pricing. Set ANTHROPIC_ADMIN_KEY to surface Anthropic's authoritative billed number alongside this estimate."
+        }
       >
-        <Row label="Total spend">
+        <Row label="Estimated spend">
           <span className="font-semibold tabular-nums">
             {monthlyUsage.costUsd.toLocaleString("en-US", {
               style: "currency",
