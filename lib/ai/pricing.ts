@@ -33,10 +33,15 @@ export type ModelRate = {
 
 const RULES: Array<{ match: (m: string) => boolean; rate: ModelRate; family: string }> = [
   // ─── Anthropic ─────────────────────────────────────────────────────
+  // Opus 4.7 and 4.8 standard pricing is $5 / $25 per Mtok. Earlier 4.x
+  // generations were $15 / $75 — if a caller pins to e.g. claude-opus-4-1,
+  // they'll be priced at the lower rate here. That's intentionally generous
+  // for legacy IDs; if the over/under matters, add a specific entry above
+  // this catch-all.
   {
     family: "claude-opus-4",
     match: (m) => /claude-opus-4/i.test(m),
-    rate: { input: 15, output: 75, cachedInput: 1.5, cacheWriteAvg: 22.5 },
+    rate: { input: 5, output: 25, cachedInput: 0.5, cacheWriteAvg: 7.5 },
   },
   {
     family: "claude-sonnet-4",
@@ -46,7 +51,7 @@ const RULES: Array<{ match: (m: string) => boolean; rate: ModelRate; family: str
   {
     family: "claude-haiku-4",
     match: (m) => /claude-haiku-4/i.test(m),
-    rate: { input: 0.8, output: 4, cachedInput: 0.08, cacheWriteAvg: 1.2 },
+    rate: { input: 1, output: 5, cachedInput: 0.1, cacheWriteAvg: 1.5 },
   },
   {
     family: "claude-haiku-3",
@@ -76,7 +81,7 @@ const RULES: Array<{ match: (m: string) => boolean; rate: ModelRate; family: str
   },
 ];
 
-const UNKNOWN_RATE: ModelRate = { input: 15, output: 75, cachedInput: 1.5, cacheWriteAvg: 22.5 };
+const UNKNOWN_RATE: ModelRate = { input: 5, output: 25, cachedInput: 0.5, cacheWriteAvg: 7.5 };
 
 export function rateFor(model: string | null | undefined): ModelRate {
   if (!model) return UNKNOWN_RATE;

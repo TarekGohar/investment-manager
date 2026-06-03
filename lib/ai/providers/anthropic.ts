@@ -14,19 +14,27 @@ const DEFAULT_MAX_TOKENS = 4096;
 
 /**
  * Claude adapter. Streams with `messages.stream`, runs multi-round tool loops
- * the same way the OpenAI provider does, and marks three prefixes with
+ * the same way the OpenAI provider does, and marks two prefixes with
  * `cache_control` so the input portion of repeat requests reads from
- * Anthropic's prompt cache at $1.50/M instead of $15/M:
+ * Anthropic's prompt cache at 10% of the input rate:
  *
- *   1. System prompt (persona + house style) — 1h TTL. Practically static.
- *   2. Tools array (last definition) — 1h TTL. Caches all tool schemas.
- *   3. Last message in the conversation — default 5min TTL. Caches the full
+ *   1. System prompt (persona + house style) — 1h TTL. Anthropic's render
+ *      order is tools → system → messages, so a marker on system caches
+ *      tools + system together. Combined size for the PM chat path is
+ *      ~6k tokens, comfortably above the 4096-token minimum on Opus models.
+ *   2. Last message in the conversation — default 5min TTL. Caches the full
  *      history through the current turn so the *next* turn (and subsequent
  *      tool rounds within this turn) reads it as a cache hit. The 5min TTL
  *      matches typical chat cadence; longer wouldn't help since this marker
  *      gets replaced on every turn anyway.
  *
- * Anthropic allows up to 4 cache breakpoints per request. We use 3 and
+ * Smaller surfaces (daily / weekly review, news classifier, thesis check)
+ * have personas well below the 4096-token minimum and will silently not
+ * cache on Opus — the cache_control block is accepted but Anthropic writes
+ * nothing. That's fine: those calls are short and their cost is dominated
+ * by the dynamic payload (portfolio snapshot, filing text), not the persona.
+ *
+ * Anthropic allows up to 4 cache breakpoints per request. We use 2 and
  * strip any stale dynamic markers on each round to stay within the cap.
  *
  * The `_params.signal` is wired into the SDK request via `signal` so aborting
@@ -334,26 +342,18 @@ function markLastMessageForCache(messages: AnthropicMessageParam[]): void {
 }
 
 function toAnthropicTools(tools: ToolDefinition[]): Anthropic.Messages.Tool[] {
-  const out: Anthropic.Messages.Tool[] = tools.map((t) => ({
+  // No cache_control on tools — the system-prompt breakpoint already caches
+  // tools + system together (Anthropic's render order is tools → system →
+  // messages, so a marker on system covers everything above it). A separate
+  // breakpoint on the last tool would cache the tools array alone, but our
+  // tool definitions clock in around 3k tokens — below Opus's 4096-token
+  // minimum cacheable prefix, so the breakpoint silently writes nothing.
+  // Saves a breakpoint slot for the messages history without losing reads.
+  return tools.map((t) => ({
     name: t.name,
     description: t.description,
     input_schema: t.parameters as Anthropic.Messages.Tool["input_schema"],
   }));
-  // Mark the final tool's definition with cache_control. Anthropic caches
-  // every preceding block up to and including the marked one — so this
-  // effectively caches the whole tools array. 1h TTL matches the system
-  // prompt; tools rarely change request-to-request.
-  if (out.length > 0) {
-    (
-      out[out.length - 1] as unknown as {
-        cache_control: { type: "ephemeral"; ttl: "1h" };
-      }
-    ).cache_control = {
-      type: "ephemeral",
-      ttl: "1h",
-    };
-  }
-  return out;
 }
 
 function safeParse(json: string): unknown {

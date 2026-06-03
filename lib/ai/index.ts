@@ -42,8 +42,8 @@ function resolveProvider(): ProviderName {
  */
 const ROLE_DEFAULTS: Record<ProviderName, Record<ModelRole, string>> = {
   anthropic: {
-    chat: "claude-opus-4-7",
-    deep: "claude-opus-4-7",
+    chat: "claude-opus-4-8",
+    deep: "claude-opus-4-8",
     review: "claude-sonnet-4-6",
     classifier: "claude-haiku-4-5-20251001",
   },
