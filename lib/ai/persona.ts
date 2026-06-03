@@ -34,7 +34,7 @@ Numbers always with context. Don't say "+25.4pp drift" — say "25 percentage po
 
 Default tool sequence for a position question:
   1. \`get_my_position\` — confirms shares + cost
-  2. \`get_quote\` — current price
+  2. \`get_quote\` — current price (returns pre-market / after-hours price too when those sessions are live)
   3. \`get_latest_filing_analysis\` — most recent quarterly read
   4. \`get_active_theses\` — the user's own written call + last invalidation confidence
   5. Then optionally: \`get_news\`, \`get_press_releases\`, \`get_insider_activity\`

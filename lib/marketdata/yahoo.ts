@@ -1,6 +1,6 @@
 import "server-only";
 import YahooFinance from "yahoo-finance2";
-import type { Candle } from "./types";
+import type { Candle, ExtendedHours, MarketState } from "./types";
 
 const yf = new YahooFinance();
 
@@ -59,4 +59,86 @@ export function fetchIntraday1W(symbol: string): Promise<Candle[]> {
   const period1 = new Date(Date.now() - 8 * 86_400_000);
   const period2 = new Date();
   return fetchChart(symbol, period1, period2, "30m");
+}
+
+// ─── Extended hours (pre-market / after-hours) ────────────────────────────
+
+type YfQuote = {
+  symbol?: string;
+  marketState?: string;
+  preMarketPrice?: number;
+  preMarketChange?: number;
+  preMarketChangePercent?: number;
+  preMarketTime?: Date | number;
+  postMarketPrice?: number;
+  postMarketChange?: number;
+  postMarketChangePercent?: number;
+  postMarketTime?: Date | number;
+};
+
+function toDate(t: Date | number | undefined): Date | null {
+  if (t == null) return null;
+  if (t instanceof Date) return t;
+  // Yahoo timestamps are unix seconds.
+  return new Date(t * 1000);
+}
+
+/**
+ * Fetch live pre-/post-market quotes for US equities via Yahoo's `quote`
+ * endpoint (no API key). Finnhub's free tier is regular-session only, so this
+ * is the extended-hours overlay. Batches every symbol into one request and
+ * never throws — extended hours is a nicety, not core data.
+ */
+export async function fetchExtendedQuotes(
+  symbols: string[],
+): Promise<Map<string, ExtendedHours>> {
+  const map = new Map<string, ExtendedHours>();
+  const uniq = Array.from(new Set(symbols.map((s) => s.toUpperCase()))).filter(Boolean);
+  if (uniq.length === 0) return map;
+
+  let rows: YfQuote[];
+  try {
+    // validateResult:false — Yahoo's payload drifts and we only read a few
+    // optional fields, so schema validation would only cause spurious throws.
+    const res = await yf.quote(uniq, {}, { validateResult: false });
+    rows = (Array.isArray(res) ? res : [res]) as YfQuote[];
+  } catch (err) {
+    console.error("[marketdata] yahoo extended-hours fetch failed:", err);
+    return map;
+  }
+
+  for (const q of rows) {
+    if (!q?.symbol) continue;
+    const state = (q.marketState ?? null) as MarketState | null;
+    const isPre = state === "PRE" || state === "PREPRE";
+    const isPost = state === "POST" || state === "POSTPOST";
+
+    let extendedPrice: number | null = null;
+    let extendedChange: number | null = null;
+    let extendedChangePct: number | null = null;
+    let extendedAsOf: Date | null = null;
+
+    if (isPre && q.preMarketPrice != null) {
+      extendedPrice = q.preMarketPrice;
+      extendedChange = q.preMarketChange ?? null;
+      extendedChangePct = q.preMarketChangePercent ?? null;
+      extendedAsOf = toDate(q.preMarketTime);
+    } else if (isPost && q.postMarketPrice != null) {
+      extendedPrice = q.postMarketPrice;
+      extendedChange = q.postMarketChange ?? null;
+      extendedChangePct = q.postMarketChangePercent ?? null;
+      extendedAsOf = toDate(q.postMarketTime);
+    }
+
+    map.set(q.symbol.toUpperCase(), {
+      ticker: q.symbol.toUpperCase(),
+      marketState: state,
+      extendedPrice,
+      extendedChange,
+      extendedChangePct,
+      extendedAsOf,
+    });
+  }
+
+  return map;
 }

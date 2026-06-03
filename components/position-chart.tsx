@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { RangePills, type Range } from "@/components/range-pills";
 import { ArrowDownRightIcon, ArrowUpRightIcon, ChatIcon } from "@/components/icons";
+import { ExtendedHoursNote } from "@/components/extended-hours";
 import { WatchlistStar } from "@/components/watchlist-star";
 import { formatCurrency, formatPercent, formatSignedCurrency } from "@/lib/format";
 import type { Quote } from "@/lib/marketdata";
@@ -78,6 +79,10 @@ export function PositionChart({
     hoveredIdx != null && hoveredIdx < bars.length && hoveredIdx >= 0 ? hoveredIdx : null;
   const hoveredBar = validHoverIdx != null ? bars[validHoverIdx] : null;
 
+  // Extended-hours readout reflects the live quote, so suppress it while the
+  // user is scrubbing a historical point on the chart.
+  const extendedQuote = hoveredBar ? null : baseQuote;
+
   const first = bars[0]?.close ?? 0;
   const last = bars[bars.length - 1]?.close ?? 0;
 
@@ -131,6 +136,7 @@ export function PositionChart({
         changePct={baseQuote?.changePct ?? 0}
         subLabel="today"
         up={(baseQuote?.changePct ?? 0) >= 0}
+        extended={extendedQuote}
         actionSlot={action}
       >
         <div className="my-6 rounded-card border border-dashed border-border bg-panel/40 p-8 text-center text-sm text-muted">
@@ -148,6 +154,7 @@ export function PositionChart({
         changePct={displayChangePct}
         subLabel={RANGE_LABEL[range]}
         up={heroUp}
+        extended={extendedQuote}
         actionSlot={action}
       >
         <div className="flex h-[260px] items-center justify-center rounded-card border border-dashed border-border bg-panel/40 text-sm text-muted">
@@ -198,6 +205,7 @@ export function PositionChart({
       changePct={displayChangePct}
       subLabel={subLabel}
       up={heroUp}
+      extended={extendedQuote}
       actionSlot={action}
     >
       {/* Chart */}
@@ -317,6 +325,7 @@ function Hero({
   changePct,
   subLabel,
   up,
+  extended,
   actionSlot,
   children,
 }: {
@@ -325,6 +334,7 @@ function Hero({
   changePct: number;
   subLabel: string;
   up: boolean;
+  extended?: Quote | null;
   actionSlot?: React.ReactNode;
   children: React.ReactNode;
 }) {
@@ -348,6 +358,15 @@ function Hero({
             {formatSignedCurrency(change)} ({formatPercent(changePct)})
             <span className="ml-1 text-[13px] font-medium text-muted">{subLabel}</span>
           </div>
+          {extended ? (
+            <ExtendedHoursNote
+              marketState={extended.marketState}
+              price={extended.extendedPrice}
+              change={extended.extendedChange}
+              changePct={extended.extendedChangePct}
+              className="mt-[8px]"
+            />
+          ) : null}
         </div>
         {actionSlot}
       </div>

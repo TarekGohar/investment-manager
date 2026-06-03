@@ -1,11 +1,16 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
 import { fetchFundamentals, fetchNews, fetchQuote } from "./finnhub";
-import { fetchCandlesYahoo, fetchIntraday1D, fetchIntraday1W } from "./yahoo";
+import {
+  fetchCandlesYahoo,
+  fetchExtendedQuotes,
+  fetchIntraday1D,
+  fetchIntraday1W,
+} from "./yahoo";
 import { tmxGetQuote, tmxGetNews } from "./tmx";
 import { cseGetQuote } from "./cse";
 import { cisionDeriveSlug, cisionListReleases, type CisionRelease } from "./cision";
-import type { Candle, Fundamentals, NewsItem, Quote } from "./types";
+import type { Candle, ExtendedHours, Fundamentals, NewsItem, Quote } from "./types";
 
 /**
  * Tickers Finnhub's free tier doesn't cover return 403. Detect listing
@@ -40,20 +45,26 @@ export function quoteCurrencyForTicker(ticker: string): "USD" | "CAD" {
   return "USD";
 }
 
-export type { Candle, Fundamentals, NewsItem, Quote } from "./types";
+export type { Candle, ExtendedHours, Fundamentals, MarketState, NewsItem, Quote } from "./types";
 
 const TTL = {
   quote: 60 * 1000, // 1 minute
   news: 30 * 60 * 1000, // 30 minutes
   fundamentals: 24 * 60 * 60 * 1000, // 24 hours
   candles: 12 * 60 * 60 * 1000, // 12 hours
+  extended: 60 * 1000, // 1 minute
 };
 
 const num = (d: { toNumber(): number } | null | undefined) => (d == null ? null : d.toNumber());
 
 // ─── Quote ──────────────────────────────────────────────────────────────
 
-export async function getQuote(ticker: string): Promise<Quote | null> {
+/**
+ * Regular-session quote (Finnhub for US, TMX/CSE for Canada). Persisted and
+ * cached in the DB. `getQuote`/`getQuotes` layer the live extended-hours
+ * overlay on top for US tickers.
+ */
+async function getBaseQuote(ticker: string): Promise<Quote | null> {
   const sym = ticker.toUpperCase();
   if (!isTradeableTicker(sym)) return null;
   const cached = await prisma.quote.findUnique({ where: { ticker: sym } });
@@ -173,13 +184,81 @@ async function fetchCanadianQuote(
   };
 }
 
+// ─── Extended hours overlay ───────────────────────────────────────────────
+
+/**
+ * Process-local cache for Yahoo extended-hours snapshots. The DB `Quote` row
+ * only stores the regular session, so we keep the volatile pre-/post-market
+ * data in memory with a short TTL — enough to dedupe the many getQuote calls a
+ * single page render fans out without hammering Yahoo.
+ */
+const extendedCache = new Map<string, { data: ExtendedHours; at: number }>();
+
+/** Only US/unknown tickers have a meaningful extended-hours session. */
+function hasExtendedHours(sym: string): boolean {
+  return listingFromTicker(sym) === "US_OR_UNKNOWN";
+}
+
+async function getExtendedHoursMap(
+  tickers: string[],
+): Promise<Map<string, ExtendedHours>> {
+  const out = new Map<string, ExtendedHours>();
+  const now = Date.now();
+  const toFetch: string[] = [];
+
+  for (const sym of tickers) {
+    const hit = extendedCache.get(sym);
+    if (hit && now - hit.at < TTL.extended) out.set(sym, hit.data);
+    else toFetch.push(sym);
+  }
+
+  if (toFetch.length > 0) {
+    const fetched = await fetchExtendedQuotes(toFetch);
+    for (const sym of toFetch) {
+      const data = fetched.get(sym);
+      if (data) {
+        extendedCache.set(sym, { data, at: now });
+        out.set(sym, data);
+      }
+    }
+  }
+  return out;
+}
+
+function applyExtended(quote: Quote, ext: ExtendedHours | undefined): Quote {
+  if (!ext) return quote;
+  return {
+    ...quote,
+    marketState: ext.marketState,
+    extendedPrice: ext.extendedPrice,
+    extendedChange: ext.extendedChange,
+    extendedChangePct: ext.extendedChangePct,
+    extendedAsOf: ext.extendedAsOf,
+  };
+}
+
+export async function getQuote(ticker: string): Promise<Quote | null> {
+  const sym = ticker.toUpperCase();
+  const base = await getBaseQuote(sym);
+  if (!base || !hasExtendedHours(sym)) return base;
+  const ext = await getExtendedHoursMap([sym]);
+  return applyExtended(base, ext.get(sym));
+}
+
 export async function getQuotes(tickers: string[]): Promise<Map<string, Quote>> {
   const unique = Array.from(new Set(tickers.map((t) => t.toUpperCase())));
-  const results = await Promise.all(unique.map((t) => getQuote(t)));
+  const results = await Promise.all(unique.map((t) => getBaseQuote(t)));
+
+  // One batched Yahoo call covers every US ticker on the page.
+  const usTickers = unique.filter(hasExtendedHours);
+  const extMap = usTickers.length > 0 ? await getExtendedHoursMap(usTickers) : null;
+
   const map = new Map<string, Quote>();
   for (let i = 0; i < unique.length; i++) {
     const q = results[i];
-    if (q) map.set(unique[i], q);
+    if (!q) continue;
+    const sym = unique[i];
+    map.set(sym, extMap && hasExtendedHours(sym) ? applyExtended(q, extMap.get(sym)) : q);
   }
   return map;
 }

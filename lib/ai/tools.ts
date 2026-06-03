@@ -43,7 +43,7 @@ export function buildTools(userId: string): ToolDefinition[] {
     {
       name: "get_quote",
       description:
-        "Live (15-min delayed) quote for a US equity ticker. Returns price, day change, % change, day high/low, previous close, and timestamp.",
+        "Live (15-min delayed) quote for a US equity ticker. Returns regular-session price, day change, % change, day high/low, previous close, and timestamp. When the market is in pre-market or after-hours, also returns marketState plus the extended-hours price and change (extendedPrice/extendedChangePct) — use these to answer questions about pre-market / after-hours moves.",
       parameters: {
         type: "object",
         properties: {
@@ -61,6 +61,12 @@ export function buildTools(userId: string): ToolDefinition[] {
         const q = await getQuote(ticker);
         if (!q) return { error: `No quote available for ${ticker}.` };
         const asOfDate = q.asOf instanceof Date ? q.asOf : new Date(q.asOf);
+        const session =
+          q.marketState === "PRE" || q.marketState === "PREPRE"
+            ? "pre-market"
+            : q.marketState === "POST" || q.marketState === "POSTPOST"
+              ? "after-hours"
+              : "regular";
         return {
           ticker: q.ticker,
           price: q.price,
@@ -73,6 +79,14 @@ export function buildTools(userId: string): ToolDefinition[] {
           asOf: q.asOf,
           ageMinutes: Math.max(0, Math.floor((Date.now() - asOfDate.getTime()) / 60_000)),
           source: q.source,
+          // Extended-hours overlay (US tickers). `price`/`change` above are
+          // always the regular session; these reflect the live pre/post move.
+          marketState: q.marketState ?? null,
+          session,
+          extendedPrice: q.extendedPrice ?? null,
+          extendedChange: q.extendedChange ?? null,
+          extendedChangePct: q.extendedChangePct ?? null,
+          extendedAsOf: q.extendedAsOf ?? null,
         };
       },
     },

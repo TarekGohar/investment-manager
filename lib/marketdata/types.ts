@@ -9,6 +9,36 @@ export type Quote = {
   low: number | null;
   asOf: Date;
   source: string;
+  /**
+   * Extended-hours overlay (US equities only, sourced from Yahoo). `price`,
+   * `change` etc. above always reflect the regular session; these fields carry
+   * the live pre-/post-market quote when one is active.
+   */
+  marketState?: MarketState | null;
+  extendedPrice?: number | null;
+  extendedChange?: number | null;
+  extendedChangePct?: number | null;
+  extendedAsOf?: Date | null;
+};
+
+/** Trading session as reported by Yahoo. */
+export type MarketState =
+  | "PRE"
+  | "REGULAR"
+  | "POST"
+  | "POSTPOST"
+  | "CLOSED"
+  | "PREPRE";
+
+/** Live extended-hours snapshot for a single US ticker. */
+export type ExtendedHours = {
+  ticker: string;
+  marketState: MarketState | null;
+  /** Pre-/post-market last price, or null outside extended hours. */
+  extendedPrice: number | null;
+  extendedChange: number | null;
+  extendedChangePct: number | null;
+  extendedAsOf: Date | null;
 };
 
 export type NewsItem = {

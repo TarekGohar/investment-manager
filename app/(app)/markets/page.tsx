@@ -5,6 +5,7 @@ import { Topbar } from "@/components/topbar";
 import { TickerBadge } from "@/components/ticker-badge";
 import { AllocationDonut } from "@/components/allocation-donut";
 import { ArrowDownRightIcon, ArrowUpRightIcon } from "@/components/icons";
+import { ExtendedHoursNote } from "@/components/extended-hours";
 import { auth } from "@/lib/auth";
 import { getEnrichedPortfolio } from "@/lib/portfolio/queries";
 import { getFundamentals, getQuote } from "@/lib/marketdata";
@@ -212,6 +213,14 @@ function IndexCard({
       >
         {formatSignedCurrency(quote.change)} today
       </div>
+      <ExtendedHoursNote
+        marketState={quote.marketState}
+        price={quote.extendedPrice}
+        change={quote.extendedChange}
+        changePct={quote.extendedChangePct}
+        size="sm"
+        className="mt-1.5"
+      />
     </Link>
   );
 }
