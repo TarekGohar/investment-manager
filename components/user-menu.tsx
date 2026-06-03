@@ -8,9 +8,11 @@ type UserMenuProps = {
   name?: string | null;
   email: string;
   image?: string | null;
+  /** Claude input + output tokens this app has spent for the user this month. */
+  tokensThisMonth?: number;
 };
 
-export function UserMenu({ name, email, image }: UserMenuProps) {
+export function UserMenu({ name, email, image, tokensThisMonth }: UserMenuProps) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
@@ -73,6 +75,17 @@ export function UserMenu({ name, email, image }: UserMenuProps) {
             <div className="truncate text-sm font-semibold">{name ?? "Signed in"}</div>
             <div className="truncate text-xs text-muted">{email}</div>
           </div>
+          {typeof tokensThisMonth === "number" ? (
+            <div className="mt-1 rounded-[10px] px-3 py-2.5">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-sm font-medium text-text">Anthropic tokens</span>
+                <span className="text-sm tabular-nums text-text">
+                  {tokensThisMonth.toLocaleString()}
+                </span>
+              </div>
+              <div className="mt-0.5 text-[11px] text-muted">used this month</div>
+            </div>
+          ) : null}
           <button
             type="button"
             role="menuitem"
