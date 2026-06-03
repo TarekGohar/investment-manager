@@ -38,7 +38,7 @@ async function main() {
     cachedTokens: null,
     cacheCreationTokens: null,
     OR: [{ inputTokens: { not: null } }, { outputTokens: { not: null } }],
-  } as const;
+  };
   const analysisMatch = messageMatch;
 
   const [msgCount, anaCount] = await Promise.all([
@@ -65,9 +65,9 @@ async function main() {
     }),
   ]);
   const totalIn =
-    (msgAgg._sum.inputTokens ?? 0) + (anaAgg._sum.inputTokens ?? 0);
+    (msgAgg._sum?.inputTokens ?? 0) + (anaAgg._sum?.inputTokens ?? 0);
   const totalOut =
-    (msgAgg._sum.outputTokens ?? 0) + (anaAgg._sum.outputTokens ?? 0);
+    (msgAgg._sum?.outputTokens ?? 0) + (anaAgg._sum?.outputTokens ?? 0);
   console.log(
     `\nLegacy aggregate being cleared: ${totalIn.toLocaleString()} input + ${totalOut.toLocaleString()} output tokens.`,
   );

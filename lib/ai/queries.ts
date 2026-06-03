@@ -379,6 +379,196 @@ export async function getMonthlyTokenUsage(
   };
 }
 
+export type AiUsageEvent = {
+  id: string;
+  /** Wall-clock time the call landed. */
+  at: Date;
+  /** "chat" | "review-daily" | "review-weekly" | "review-annual" | "filing-deep" | "other" */
+  kind: AiUsageKind;
+  /** Free-form human label for the row, e.g. "Daily review", "Chat (NVDA)". */
+  label: string;
+  /** Ticker if the call was position-scoped; null for portfolio-wide. */
+  ticker: string | null;
+  /** Model id that ran the call (e.g. claude-opus-4-7, gpt-4o). */
+  model: string | null;
+  /** Per-bucket token counts. */
+  inputTokens: number;
+  cachedTokens: number;
+  cacheCreationTokens: number;
+  outputTokens: number;
+  /** Total billed tokens across all input buckets + output. */
+  totalTokens: number;
+  /** USD cost computed from token counts × per-model pricing. */
+  costUsd: number;
+};
+
+export type AiUsageKind =
+  | "chat"
+  | "review-daily"
+  | "review-weekly"
+  | "review-annual"
+  | "filing-deep"
+  | "other";
+
+/**
+ * Recent AI calls that *cost something*, both from chat and from the
+ * background analysis pipeline (reviews, quarterly summaries, etc.). Joined
+ * across the two source tables — AIMessage for chat, AIAnalysis for the
+ * rest — and sorted newest first. Rows with zero tokens (e.g. user-only
+ * messages, NO_REVIEW_NEEDED skips) are filtered out so the feed only
+ * shows things that actually drew down the meter.
+ */
+export async function listRecentAiEvents(
+  userId: string,
+  limit = 50,
+): Promise<AiUsageEvent[]> {
+  const { computeCostUsd } = await import("@/lib/ai/pricing");
+
+  // Pull more than we'll show so the filter-then-sort-and-slice produces a
+  // full window even when some rows have null tokens.
+  const fetchN = limit * 4;
+
+  const [messages, analyses] = await Promise.all([
+    prisma.aIMessage.findMany({
+      where: {
+        conversation: { userId },
+        role: "assistant",
+        OR: [
+          { inputTokens: { not: null } },
+          { outputTokens: { not: null } },
+          { cachedTokens: { not: null } },
+          { cacheCreationTokens: { not: null } },
+        ],
+      },
+      orderBy: { createdAt: "desc" },
+      take: fetchN,
+      select: {
+        id: true,
+        createdAt: true,
+        model: true,
+        inputTokens: true,
+        cachedTokens: true,
+        cacheCreationTokens: true,
+        outputTokens: true,
+        conversation: { select: { scope: true } },
+      },
+    }),
+    prisma.aIAnalysis.findMany({
+      where: {
+        userId,
+        OR: [
+          { inputTokens: { not: null } },
+          { outputTokens: { not: null } },
+          { cachedTokens: { not: null } },
+          { cacheCreationTokens: { not: null } },
+        ],
+      },
+      orderBy: { generatedAt: "desc" },
+      take: fetchN,
+      select: {
+        id: true,
+        kind: true,
+        ticker: true,
+        title: true,
+        generatedAt: true,
+        model: true,
+        inputTokens: true,
+        cachedTokens: true,
+        cacheCreationTokens: true,
+        outputTokens: true,
+      },
+    }),
+  ]);
+
+  const events: AiUsageEvent[] = [];
+
+  for (const m of messages) {
+    const input = m.inputTokens ?? 0;
+    const cached = m.cachedTokens ?? 0;
+    const cacheCreation = m.cacheCreationTokens ?? 0;
+    const output = m.outputTokens ?? 0;
+    const total = input + cached + cacheCreation + output;
+    if (total === 0) continue;
+    const scope = m.conversation?.scope ?? null;
+    const ticker = scope && scope !== "portfolio" ? scope.toUpperCase() : null;
+    events.push({
+      id: `msg:${m.id}`,
+      at: m.createdAt,
+      kind: "chat",
+      label: ticker ? `Chat · ${ticker}` : "Chat",
+      ticker,
+      model: m.model,
+      inputTokens: input,
+      cachedTokens: cached,
+      cacheCreationTokens: cacheCreation,
+      outputTokens: output,
+      totalTokens: total,
+      costUsd: computeCostUsd({
+        model: m.model,
+        inputTokens: input,
+        cachedTokens: cached,
+        cacheCreationTokens: cacheCreation,
+        outputTokens: output,
+      }),
+    });
+  }
+
+  for (const a of analyses) {
+    const input = a.inputTokens ?? 0;
+    const cached = a.cachedTokens ?? 0;
+    const cacheCreation = a.cacheCreationTokens ?? 0;
+    const output = a.outputTokens ?? 0;
+    const total = input + cached + cacheCreation + output;
+    if (total === 0) continue;
+    const { kind, label } = labelForAnalysis(a.kind, a.ticker, a.title);
+    events.push({
+      id: `ana:${a.id}`,
+      at: a.generatedAt,
+      kind,
+      label,
+      ticker: a.ticker,
+      model: a.model,
+      inputTokens: input,
+      cachedTokens: cached,
+      cacheCreationTokens: cacheCreation,
+      outputTokens: output,
+      totalTokens: total,
+      costUsd: computeCostUsd({
+        model: a.model,
+        inputTokens: input,
+        cachedTokens: cached,
+        cacheCreationTokens: cacheCreation,
+        outputTokens: output,
+      }),
+    });
+  }
+
+  events.sort((a, b) => b.at.getTime() - a.at.getTime());
+  return events.slice(0, limit);
+}
+
+function labelForAnalysis(
+  kind: string,
+  ticker: string | null,
+  title: string | null,
+): { kind: AiUsageKind; label: string } {
+  switch (kind) {
+    case "EOD_DAILY":
+      return { kind: "review-daily", label: "Daily review" };
+    case "WEEKLY":
+      return { kind: "review-weekly", label: "Weekly review" };
+    case "ANNUAL_REVIEW":
+      return { kind: "review-annual", label: "Annual review" };
+    case "QUARTERLY_DEEP":
+      return {
+        kind: "filing-deep",
+        label: ticker ? `Filing read · ${ticker}` : title ?? "Filing read",
+      };
+    default:
+      return { kind: "other", label: title ?? kind };
+  }
+}
+
 export async function clearConversation(id: string) {
   await prisma.aIMessage.deleteMany({ where: { conversationId: id } });
   await prisma.aIConversation.update({
