@@ -109,7 +109,7 @@ async function generateAnalysis(args: {
   | null
 > {
   const provider = getProvider();
-  const model = getModel();
+  const model = getModel("review");
 
   // Find the most recent prior analysis of the same kind so this run can
   // grade its predictions instead of starting cold.
@@ -184,7 +184,7 @@ export async function generateDailyReview(userId: string): Promise<string | null
         hasAnyQuote: portfolio.hasAnyQuote,
         holdingsCount: portfolio.holdings.length,
       },
-      model: getModel(),
+      model: getModel("review"),
       inputTokens: result.tokens?.input,
       outputTokens: result.tokens?.output,
     },
@@ -219,7 +219,7 @@ export async function generateWeeklyReview(userId: string): Promise<string | nul
         totalCost: portfolio.totalCost,
         holdingsCount: portfolio.holdings.length,
       },
-      model: getModel(),
+      model: getModel("review"),
       inputTokens: result.tokens?.input,
       outputTokens: result.tokens?.output,
     },

@@ -38,7 +38,7 @@ export async function classifyHeadlines(
 ): Promise<NewsSeverity[]> {
   if (items.length === 0) return [];
   const provider = getProvider();
-  const model = getModel();
+  const model = getModel("classifier");
 
   const lines: string[] = [];
   items.forEach((item, i) => {

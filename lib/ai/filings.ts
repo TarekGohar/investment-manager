@@ -92,7 +92,7 @@ export async function summarizeQuarterly(
 ): Promise<string | null> {
   const { userId, ticker, filing, priorFiling } = args;
   const provider = getProvider();
-  const model = getModel();
+  const model = getModel("deep");
 
   // Pull the user's thesis (if any) so the prompt can address it directly
   // instead of inventing a generic bull/bear case.

@@ -84,7 +84,7 @@ export async function checkThesisInvalidation(args: {
     .join("\n");
 
   const provider = getProvider();
-  const model = getModel();
+  const model = getModel("classifier");
   let raw = "";
 
   try {

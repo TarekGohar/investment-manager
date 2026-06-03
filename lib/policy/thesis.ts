@@ -176,7 +176,7 @@ export async function reviewThesis(
   sections.push("Produce the thesis re-check per your structure.");
 
   const provider = getProvider();
-  const model = getModel();
+  const model = getModel("review");
   let body = "";
 
   for await (const ev of provider.streamChat({

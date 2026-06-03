@@ -48,7 +48,7 @@ export async function POST(req: Request) {
 
   const tools = buildTools(session.user.id);
   const provider = getProvider();
-  const model = getModel();
+  const model = getModel("chat");
 
   const encoder = new TextEncoder();
   const aborter = new AbortController();

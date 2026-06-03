@@ -111,7 +111,7 @@ export async function generateAnnualReview(args: {
   });
 
   const provider = getProvider();
-  const model = getModel();
+  const model = getModel("deep");
   let body = "";
   let usage: { inputTokens: number; outputTokens: number } | undefined;
 
