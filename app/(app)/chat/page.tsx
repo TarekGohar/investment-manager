@@ -109,7 +109,7 @@ export default async function ChatPage({
           currentId={active?.id ?? null}
           currentScope={scope}
         />
-        <div className="min-w-0 flex-1">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <ChatUI
             key={active?.id ?? "empty"}
             initialMessages={initialMessages}
