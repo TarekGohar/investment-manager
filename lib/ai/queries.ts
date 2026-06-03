@@ -229,6 +229,37 @@ export function toChatHistory(stored: StoredMessage[]): ChatMessage[] {
   return out;
 }
 
+export type MonthlyTokenUsage = {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+};
+
+/**
+ * Anthropic exposes no "remaining balance" endpoint, so we self-track spend.
+ * Sums the Claude input + output tokens this app has burned on the user's own
+ * AI messages in the current calendar month (UTC). Token counts are already
+ * persisted per assistant message by the chat route, so this is a pure read.
+ *
+ * The `model startsWith "claude"` filter keeps the figure Anthropic-specific:
+ * if AI_PROVIDER is OpenAI/Azure those rows don't match and the total is 0.
+ */
+export async function getMonthlyTokenUsage(userId: string): Promise<MonthlyTokenUsage> {
+  const now = new Date();
+  const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  const agg = await prisma.aIMessage.aggregate({
+    _sum: { inputTokens: true, outputTokens: true },
+    where: {
+      createdAt: { gte: monthStart },
+      model: { startsWith: "claude" },
+      conversation: { userId },
+    },
+  });
+  const inputTokens = agg._sum.inputTokens ?? 0;
+  const outputTokens = agg._sum.outputTokens ?? 0;
+  return { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens };
+}
+
 export async function clearConversation(id: string) {
   await prisma.aIMessage.deleteMany({ where: { conversationId: id } });
   await prisma.aIConversation.update({

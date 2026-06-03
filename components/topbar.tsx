@@ -11,6 +11,7 @@ import { getThemeFromCookie } from "@/lib/theme";
 import { getUserTickers } from "@/lib/portfolio/queries";
 import { countUnreadEvents } from "@/lib/signals/queries";
 import { getUserPreferences } from "@/lib/preferences";
+import { getMonthlyTokenUsage } from "@/lib/ai/queries";
 
 type TopbarProps = {
   title: ReactNode;
@@ -24,13 +25,14 @@ export async function Topbar({ title, backHref, rightSlot }: TopbarProps) {
     getThemeFromCookie(),
   ]);
   const user = session?.user;
-  const [tickers, notifications, preferences] = user
+  const [tickers, notifications, preferences, tokenUsage] = user
     ? await Promise.all([
         getUserTickers(user.id),
         countUnreadEvents(user.id),
         getUserPreferences(user.id),
+        getMonthlyTokenUsage(user.id),
       ])
-    : [[], 0, null];
+    : [[], 0, null, null];
   const showBadge = preferences?.showNotificationBadge !== false;
 
   return (
@@ -92,7 +94,14 @@ export async function Topbar({ title, backHref, rightSlot }: TopbarProps) {
         <GridIcon className="h-5 w-5" />
       </button>
 
-      {user ? <UserMenu name={user.name} email={user.email} image={user.image} /> : null}
+      {user ? (
+        <UserMenu
+          name={user.name}
+          email={user.email}
+          image={user.image}
+          tokensThisMonth={tokenUsage?.totalTokens ?? 0}
+        />
+      ) : null}
 
       {rightSlot}
     </header>
