@@ -60,6 +60,7 @@ export function buildTools(userId: string): ToolDefinition[] {
         if (!ticker) return { error: "Missing ticker." };
         const q = await getQuote(ticker);
         if (!q) return { error: `No quote available for ${ticker}.` };
+        const asOfDate = q.asOf instanceof Date ? q.asOf : new Date(q.asOf);
         return {
           ticker: q.ticker,
           price: q.price,
@@ -70,6 +71,7 @@ export function buildTools(userId: string): ToolDefinition[] {
           high: q.high,
           low: q.low,
           asOf: q.asOf,
+          ageMinutes: Math.max(0, Math.floor((Date.now() - asOfDate.getTime()) / 60_000)),
           source: q.source,
         };
       },
@@ -98,13 +100,18 @@ export function buildTools(userId: string): ToolDefinition[] {
         const limit = clampInt(getProp(input, "limit"), 8, 1, 20);
         if (!ticker) return { error: "Missing ticker." };
         const items = await getNews(ticker, limit);
-        return items.map((n) => ({
-          headline: n.headline,
-          summary: n.summary,
-          source: n.source,
-          publishedAt: n.publishedAt,
-          url: n.url,
-        }));
+        const now = Date.now();
+        return items.map((n) => {
+          const pub = n.publishedAt instanceof Date ? n.publishedAt : new Date(n.publishedAt);
+          return {
+            headline: n.headline,
+            summary: n.summary,
+            source: n.source,
+            publishedAt: n.publishedAt,
+            ageDays: Math.floor((now - pub.getTime()) / 86_400_000),
+            url: n.url,
+          };
+        });
       },
     },
 
@@ -554,7 +561,7 @@ export function buildTools(userId: string): ToolDefinition[] {
     {
       name: "get_latest_filing_analysis",
       description:
-        "Most recent AI quarterly read (10-Q / 10-K) for a held US-listed ticker, plus the indexed filing history. Use this to ground commentary on what actually happened in the most recent print rather than guessing from training data. Returns null `analysis` when no quarterly read has been generated yet — in that case do not fabricate one; instead say which filings exist in the index and offer to summarize once the cron runs (or summarize on-demand if asked).",
+        "Most recent AI quarterly read (10-Q / 10-K / 40-F / 6-K) for a ticker, plus the indexed filing history. Use this to ground commentary on what actually happened in the most recent print. Returns `analysisAgeDays` and `filingAgeDays` so you can judge staleness — if either exceeds 60, follow up with `get_news` / `get_press_releases` to bridge the gap. Returns null `analysis` when no quarterly read has been generated yet — in that case do not fabricate one; list which filings exist in the index instead.",
       parameters: {
         type: "object",
         properties: { ticker: { type: "string" } },
@@ -580,14 +587,22 @@ export function buildTools(userId: string): ToolDefinition[] {
             },
           }),
         ]);
+        const now = Date.now();
+        const dayMs = 86_400_000;
         return {
           ticker,
+          dataAsOf: new Date().toISOString(),
           analysis: analysis
             ? {
                 title: analysis.title,
                 body: analysis.body,
                 generatedAt: analysis.generatedAt.toISOString(),
+                analysisAgeDays: Math.floor((now - analysis.generatedAt.getTime()) / dayMs),
                 filingId: analysis.filingId,
+                filingFiledAt: analysis.filedAt ? analysis.filedAt.toISOString() : null,
+                filingAgeDays: analysis.filedAt
+                  ? Math.floor((now - analysis.filedAt.getTime()) / dayMs)
+                  : null,
               }
             : null,
           filings: filings.map((f) => ({
@@ -597,6 +612,7 @@ export function buildTools(userId: string): ToolDefinition[] {
             title: f.title,
             url: f.url,
             filedAt: f.filedAt.toISOString(),
+            ageDays: Math.floor((now - f.filedAt.getTime()) / dayMs),
           })),
         };
       },

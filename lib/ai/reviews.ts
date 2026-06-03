@@ -1,41 +1,61 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
 import { getProvider, getModel } from "@/lib/ai";
+import {
+  HOUSE_STYLE,
+  NO_REVIEW_SENTINEL,
+  currentContext,
+  isNoReviewSentinel,
+} from "@/lib/ai/context";
 import type { EnrichedPortfolio } from "@/lib/portfolio/types";
 import { getEnrichedPortfolio } from "@/lib/portfolio/queries";
 import { formatCurrency, formatPercent, formatSignedCurrency } from "@/lib/format";
 
-const DAILY_PERSONA = `You are a portfolio manager writing the end-of-day note for a single retail investor.
-Keep it tight — 220 words or fewer. Markdown formatting.
+const MATERIAL_MOVE_PCT = 3;
+
+const DAILY_PERSONA = `${HOUSE_STYLE}
+
+You are a portfolio manager writing the end-of-day note for a single retail investor.
+
+Output gate — read carefully:
+- If the only material change since the last review is intra-day price noise (no single position moved ±${MATERIAL_MOVE_PCT}% or more, no new filing, no thesis-invalidation fire, no IPS drift breach, no material news) — output the literal token "${NO_REVIEW_SENTINEL}" and STOP. Don't write anything else.
+- Otherwise: produce the EOD note as below.
+
+Keep it tight — 220 words or fewer. Markdown.
 
 Structure:
-1. **Lead** — the net portfolio move today in $ and %, and what carried it
-2. **Positions** — name the 2-3 biggest contributors (and detractors), with their dollar moves
+1. **Lead** — net portfolio move in $ and %, what carried it
+2. **Positions** — name the 2-3 biggest contributors / detractors with dollar moves
 3. **Risk note** — concentration, unusual day moves, anything to flag
-4. **Watch** — one specific thing for tomorrow (an earnings print, a level, a position to re-check)
+4. **Watch** — one specific thing for tomorrow. If there's genuinely nothing notable to watch, write "Nothing on the calendar — quiet day expected." instead of inventing filler.
 
-Style: dense buy-side analyst writing to a peer. **Bold** tickers and key numbers.
-No hedging, no "as an AI", no advice. Use the snapshot numbers verbatim — never estimate.`;
+If a YESTERDAY'S DAILY REVIEW block appears in context, your "Watch" item must explicitly grade yesterday's "Watch" item (resolved / still open / superseded).`;
 
-const WEEKLY_PERSONA = `You are a portfolio manager writing the weekly review for a single retail investor.
-Keep it under 500 words. Markdown formatting with sub-headers.
+const WEEKLY_PERSONA = `${HOUSE_STYLE}
+
+You are a portfolio manager writing the weekly review for a single retail investor.
+
+Output gate:
+- If no position moved ±5% on the week, no new filing landed, no thesis-invalidation alert fired, and no IPS drift was breached — output "${NO_REVIEW_SENTINEL}" and STOP.
+- Otherwise: produce the review as below.
+
+Keep it under 500 words. Markdown with sub-headers.
 
 Structure:
 ### Week in review
 Net portfolio move, biggest contributors and detractors, sector tilts if visible.
 
+### Versus last week
+If a PRIOR WEEKLY REVIEW block appears in context, grade its "Worth watching" items: resolved, still open, or deteriorated. If no prior review, write "First weekly review — no prior to compare against."
+
 ### Position-level commentary
-For positions that moved materially or whose thesis is being tested, write 1-2 sentences each.
+For positions that moved ±${MATERIAL_MOVE_PCT}%+ on the week or whose thesis is being tested, 1-2 sentences each.
 
 ### Risk
-Concentration (any single name > 20% weight), drawdowns vs cost, any unusual correlations.
+Concentration (any single name > 20% weight), drawdowns vs cost, unusual correlations.
 
 ### Worth watching
-2-3 specific things for next week — earnings, macro events, key technical levels.
-
-End with: "_This is research, not advice._"
-
-Style: confident, dense, no hedging. **Bold** tickers and key numbers. Use snapshot data only.`;
+2-3 specific things for next week — earnings, macro events, key technical levels. These will be graded by next week's review, so be measurable.`;
 
 function formatPortfolioSnapshot(p: EnrichedPortfolio): string {
   const lines: string[] = [];
@@ -82,12 +102,33 @@ async function generateAnalysis(args: {
   system: string;
   task: string;
   portfolio: EnrichedPortfolio;
-}): Promise<{ body: string; tokens?: { input: number; output: number } } | null> {
+  priorAnalysisLabel: string;
+}): Promise<
+  | { body: string; tokens?: { input: number; output: number }; skipped?: false }
+  | { skipped: true }
+  | null
+> {
   const provider = getProvider();
   const model = getModel();
 
+  // Find the most recent prior analysis of the same kind so this run can
+  // grade its predictions instead of starting cold.
+  const prior = await prisma.aIAnalysis.findFirst({
+    where: { userId: args.userId, kind: args.kind },
+    orderBy: { generatedAt: "desc" },
+    select: { body: true, generatedAt: true },
+  });
+
   const snapshot = formatPortfolioSnapshot(args.portfolio);
-  const userMessage = `${args.task}\n\nPortfolio snapshot:\n${snapshot}`;
+  const context = currentContext({
+    freshness: [
+      { label: "Portfolio snapshot", at: args.portfolio.quoteAsOf ?? new Date() },
+    ],
+    priorAnalysis: prior
+      ? { label: args.priorAnalysisLabel, body: prior.body, generatedAt: prior.generatedAt }
+      : null,
+  });
+  const userMessage = `${context}\n\n${args.task}\n\nPortfolio snapshot:\n${snapshot}`;
 
   let body = "";
   let usage: { inputTokens: number; outputTokens: number } | undefined;
@@ -104,9 +145,11 @@ async function generateAnalysis(args: {
     if (ev.type === "error") return null;
   }
 
-  if (!body.trim()) return null;
+  const trimmed = body.trim();
+  if (!trimmed) return null;
+  if (isNoReviewSentinel(trimmed)) return { skipped: true };
   return {
-    body: body.trim(),
+    body: trimmed,
     tokens: usage ? { input: usage.inputTokens, output: usage.outputTokens } : undefined,
   };
 }
@@ -119,10 +162,11 @@ export async function generateDailyReview(userId: string): Promise<string | null
     userId,
     kind: "EOD_DAILY",
     system: DAILY_PERSONA,
-    task: "Write the end-of-day portfolio note.",
+    task: "Write the end-of-day portfolio note (or output the skip sentinel if nothing material).",
     portfolio,
+    priorAnalysisLabel: "Yesterday's daily review",
   });
-  if (!result) return null;
+  if (!result || result.skipped) return null;
 
   const now = new Date();
   const created = await prisma.aIAnalysis.create({
@@ -157,10 +201,11 @@ export async function generateWeeklyReview(userId: string): Promise<string | nul
     userId,
     kind: "WEEKLY",
     system: WEEKLY_PERSONA,
-    task: "Write the weekly portfolio review.",
+    task: "Write the weekly portfolio review (or output the skip sentinel if nothing material).",
     portfolio,
+    priorAnalysisLabel: "Last week's review",
   });
-  if (!result) return null;
+  if (!result || result.skipped) return null;
 
   const now = new Date();
   const created = await prisma.aIAnalysis.create({

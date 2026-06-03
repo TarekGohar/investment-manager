@@ -1,6 +1,6 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
-import { classifyHeadline } from "@/lib/ai/news-classifier";
+import { classifyHeadlines } from "@/lib/ai/news-classifier";
 import { getUserPreferences } from "@/lib/preferences";
 
 export const dynamic = "force-dynamic";
@@ -70,21 +70,32 @@ export async function GET(req: Request) {
     take: MAX_ITEMS_PER_RUN,
   });
 
+  // Batch in groups of 20 — single-headline calls waste tokens (system
+  // message is ~5× the input length) and don't let the model dedupe
+  // same-story rewrites within a batch.
+  const BATCH = 20;
   let classified = 0;
-  for (const item of items) {
+  for (let i = 0; i < items.length; i += BATCH) {
+    const chunk = items.slice(i, i + BATCH);
     try {
-      const severity = await classifyHeadline({
-        ticker: item.ticker,
-        headline: item.headline,
-        summary: item.summary,
-      });
-      await prisma.newsItem.update({
-        where: { id: item.id },
-        data: { aiSeverity: severity, classifiedAt: new Date() },
-      });
-      classified += 1;
+      const severities = await classifyHeadlines(
+        chunk.map((it) => ({
+          ticker: it.ticker,
+          headline: it.headline,
+          summary: it.summary,
+          source: it.source,
+          publishedAt: it.publishedAt,
+        })),
+      );
+      for (let j = 0; j < chunk.length; j++) {
+        await prisma.newsItem.update({
+          where: { id: chunk[j].id },
+          data: { aiSeverity: severities[j], classifiedAt: new Date() },
+        });
+        classified += 1;
+      }
     } catch (err) {
-      console.error(`[cron/classify-news] item ${item.id} failed:`, err);
+      console.error(`[cron/classify-news] batch failed:`, err);
     }
   }
 

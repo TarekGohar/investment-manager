@@ -40,6 +40,8 @@ Output JSON only, no prose, no markdown fence. Schema:
 Rules:
 - Default to matched=false when the filing summary doesn't speak directly to the criterion. Better to under-alert than spam.
 - confidence ≥ 60 means you'd send the alert. Use it as a precision threshold, not a recall threshold.
+- If a PRIOR CHECK block is provided, weight the trend: confidence rising from check-to-check is itself a signal. A criterion at 55→65→70 over three checks deserves attention even though each call alone might be sub-threshold. Note the trend in reasoning.
+- If the filing summary doesn't address the criterion AND prior checks also didn't address it (3+ in a row), say so in reasoning — "management has now skipped this metric across N filings".
 - criterionTriggered must paraphrase the EXACT criterion you think is met, taken from the user's invalidation text.
 - reasoning is ≤ 3 sentences. Cite the specific line from the filing summary that triggered the match. If matched=false, briefly say why (the filing didn't address it / addressed it but criterion not met).
 - Never invent numbers not in the filing summary.
@@ -52,7 +54,19 @@ export async function checkThesisInvalidation(args: {
   filingSummary: string;
   filingType?: string;
   filedAtIso?: string;
+  priorChecks?: Array<{ at: Date; confidence: number; reasoning: string }>;
 }): Promise<ThesisCheckResult> {
+  const priorBlock = args.priorChecks && args.priorChecks.length > 0
+    ? [
+        "",
+        "PRIOR CHECKS (oldest first):",
+        ...args.priorChecks.map(
+          (c) =>
+            `- ${c.at.toISOString().slice(0, 10)}: confidence ${c.confidence}. ${c.reasoning.slice(0, 240)}`,
+        ),
+      ]
+    : [];
+
   const userMessage = [
     `Ticker: ${args.ticker}`,
     args.filingType ? `Filing: ${args.filingType}${args.filedAtIso ? ` filed ${args.filedAtIso}` : ""}` : null,
@@ -62,6 +76,7 @@ export async function checkThesisInvalidation(args: {
     "",
     "AI QUARTERLY READ OF THE LATEST FILING:",
     args.filingSummary,
+    ...priorBlock,
     "",
     "Output the JSON object now.",
   ]

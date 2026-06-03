@@ -1,6 +1,7 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
 import { getProvider, getModel } from "@/lib/ai";
+import { HOUSE_STYLE, currentContext } from "@/lib/ai/context";
 import { getEnrichedPortfolio, listTransactions } from "@/lib/portfolio/queries";
 import { getInvestmentPolicy, computeDrift } from "@/lib/policy/ips";
 import { listTheses } from "@/lib/policy/thesis";
@@ -11,7 +12,9 @@ import {
   formatPercent,
 } from "@/lib/format";
 
-const ANNUAL_PERSONA = `You are a portfolio manager writing the once-a-year deep review for a single retail investor.
+const ANNUAL_PERSONA = `${HOUSE_STYLE}
+
+You are a portfolio manager writing the once-a-year deep review for a single retail investor.
 
 Output 800–1200 words of dense markdown. No fluff, no closing pleasantries, no "let me dive in".
 
@@ -32,14 +35,15 @@ Realized vs. unrealized gain mix. Active TLH opportunities still open at year-en
 ### What worked, what didn't
 Two short paragraphs. What stance / category / discipline paid off, what didn't. Cite specific positions.
 
-### Plan for next year
-3–5 specific commitments framed as IPS / behavioral changes, not stock picks. Avoid generic "consider rebalancing" — be concrete: "Add a 5% bonds target", "Cap tech weight at 30%", "No new positions in the first quarter without a written thesis", etc.
+### Versus last year's plan
+If a PRIOR ANNUAL REVIEW block appears in context, grade its "Plan for next year" commitments one by one — kept / partially kept / dropped. If no prior annual review, say "First annual review on file."
 
-Style rules:
-- **Bold** ticker mentions and key $ / % figures.
+### Plan for next year
+3–5 specific commitments framed as IPS / behavioral changes, not stock picks. Avoid generic "consider rebalancing" — be concrete: "Add a 5% bonds target", "Cap tech weight at 30%", "No new positions in the first quarter without a written thesis". These will be graded by next year's review, so make them measurable.
+
+Rules:
 - Never invent a number. If a data section is empty, say "no data" rather than guess.
-- No buy/sell recommendations beyond what the user's own IPS / thesis explicitly implies.
-- No "as an AI" hedges. Research, not advice.`;
+- No buy/sell recommendations beyond what the user's own IPS / thesis explicitly implies.`;
 
 export async function generateAnnualReview(args: {
   userId: string;
@@ -66,19 +70,21 @@ export async function generateAnnualReview(args: {
     (t) => t.occurredAt >= yearStart && t.occurredAt < yearEnd,
   );
 
-  let realizedThisYear = 0;
   let dividendsThisYear = 0;
   let fwtThisYear = 0;
   for (const t of yearTxs) {
-    if (t.kind === "SELL") {
-      // Approximate realized — true ACB-based realized is captured in holdings
-      // derivation but not per-year by default. This is a rough proxy.
-      realizedThisYear += t.quantity * t.price - t.fees;
-    } else if (t.kind === "DIVIDEND") {
+    if (t.kind === "DIVIDEND") {
       dividendsThisYear += t.price;
       fwtThisYear += t.foreignTaxWithheld;
     }
   }
+
+  // Pull prior annual review so this run can grade last year's commitments.
+  const priorReview = await prisma.aIAnalysis.findFirst({
+    where: { userId, kind: "ANNUAL_REVIEW" },
+    orderBy: { generatedAt: "desc" },
+    select: { body: true, generatedAt: true },
+  });
 
   const snapshot = buildSnapshotText({
     year,
@@ -87,10 +93,21 @@ export async function generateAnnualReview(args: {
     drift,
     theses,
     tlh,
-    realizedThisYear,
     dividendsThisYear,
     fwtThisYear,
     yearTxCount: yearTxs.length,
+  });
+  const context = currentContext({
+    freshness: [
+      { label: "Portfolio snapshot", at: portfolio.quoteAsOf ?? new Date() },
+    ],
+    priorAnalysis: priorReview
+      ? {
+          label: "Prior annual review",
+          body: priorReview.body,
+          generatedAt: priorReview.generatedAt,
+        }
+      : null,
   });
 
   const provider = getProvider();
@@ -101,7 +118,7 @@ export async function generateAnnualReview(args: {
   for await (const ev of provider.streamChat({
     model,
     system: ANNUAL_PERSONA,
-    messages: [{ role: "user", text: snapshot }],
+    messages: [{ role: "user", text: `${context}\n\n${snapshot}` }],
     tools: [],
     maxToolRounds: 1,
   })) {
@@ -122,12 +139,12 @@ export async function generateAnnualReview(args: {
         totalMarketValueCad: portfolio.totalMarketValue,
         totalCostCad: portfolio.totalCost,
         totalUnrealizedCad: portfolio.totalUnrealized,
-        realizedThisYear,
         dividendsThisYear,
         fwtThisYear,
         thesesCount: theses.length,
         driftBreaches: drift.rows.filter((r) => r.exceedsThreshold).length,
         tlhCandidates: tlh.length,
+        hasPriorReview: Boolean(priorReview),
       },
       model,
       inputTokens: usage?.inputTokens,
@@ -145,7 +162,6 @@ function buildSnapshotText(args: {
   drift: ReturnType<typeof computeDrift>;
   theses: Awaited<ReturnType<typeof listTheses>>;
   tlh: ReturnType<typeof findTlhCandidates>;
-  realizedThisYear: number;
   dividendsThisYear: number;
   fwtThisYear: number;
   yearTxCount: number;
@@ -165,8 +181,8 @@ function buildSnapshotText(args: {
   lines.push("");
   lines.push(`=== This year (${args.year}) ===`);
   lines.push(`Transactions: ${args.yearTxCount}`);
-  lines.push(`Realized this year (gross of cost basis): ${formatSignedCurrency(args.realizedThisYear)}`);
   lines.push(`Dividends this year: ${formatCurrency(args.dividendsThisYear)} (FWT ${formatCurrency(args.fwtThisYear)})`);
+  lines.push(`Realized this year: not separately tracked — use lifetime realized above and note that this is cumulative across all years, not annual.`);
   lines.push("");
   lines.push("=== Holdings ===");
   for (const h of p.holdings) {

@@ -56,12 +56,24 @@ export async function runThesisInvalidationCheck(args: {
 
     let result;
     try {
+      const priorChecks =
+        thesis.lastInvalidationCheckAt &&
+        thesis.lastInvalidationConfidence != null
+          ? [
+              {
+                at: thesis.lastInvalidationCheckAt,
+                confidence: thesis.lastInvalidationConfidence,
+                reasoning: thesis.lastInvalidationReasoning ?? "",
+              },
+            ]
+          : undefined;
       result = await checkThesisInvalidation({
         ticker,
         invalidationCriteria: thesis.invalidationCriteria,
         filingSummary: args.filingSummary,
         filingType: args.filingType,
         filedAtIso,
+        priorChecks,
       });
     } catch (err) {
       console.error(`[thesis-check] ${thesis.userId}:${ticker} failed:`, err);
