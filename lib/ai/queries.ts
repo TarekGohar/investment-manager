@@ -233,31 +233,115 @@ export type MonthlyTokenUsage = {
   inputTokens: number;
   outputTokens: number;
   totalTokens: number;
+  /** USD spend this month across all AI surfaces, computed from token counts × per-model pricing. */
+  costUsd: number;
+  /** Per-model-family breakdown so the UI can show what's burning the credits. */
+  byFamily: Array<{
+    family: string;
+    inputTokens: number;
+    outputTokens: number;
+    costUsd: number;
+  }>;
+  /** Filter that was applied — useful for the UI label. */
+  provider: "anthropic" | "openai" | "all";
 };
 
 /**
- * Anthropic exposes no "remaining balance" endpoint, so we self-track spend.
- * Sums the Claude input + output tokens this app has burned on the user's own
- * AI messages in the current calendar month (UTC). Token counts are already
- * persisted per assistant message by the chat route, so this is a pure read.
+ * Anthropic / OpenAI don't expose a "remaining credits" endpoint on the
+ * regular API key, so we self-track spend from the model + token columns
+ * we persist on every AI row.
  *
- * The `model startsWith "claude"` filter keeps the figure Anthropic-specific:
- * if AI_PROVIDER is OpenAI/Azure those rows don't match and the total is 0.
+ * Sources summed:
+ *   - AIMessage (chat assistant turns)
+ *   - AIAnalysis (daily/weekly/annual reviews, quarterly summaries, on-demand
+ *     thesis reviews — all the cron + on-demand non-chat work)
+ *
+ * `provider` filters which rows count toward the total:
+ *   "anthropic" → only models that look Claude-ish (default — matches the
+ *                 UI label "Anthropic spend").
+ *   "openai"    → only models that look GPT-ish.
+ *   "all"       → every row regardless of family.
  */
-export async function getMonthlyTokenUsage(userId: string): Promise<MonthlyTokenUsage> {
+export async function getMonthlyTokenUsage(
+  userId: string,
+  opts: { provider?: "anthropic" | "openai" | "all" } = {},
+): Promise<MonthlyTokenUsage> {
+  const provider = opts.provider ?? "anthropic";
+  const { computeCostUsd, familyFor } = await import("@/lib/ai/pricing");
   const now = new Date();
   const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-  const agg = await prisma.aIMessage.aggregate({
-    _sum: { inputTokens: true, outputTokens: true },
-    where: {
-      createdAt: { gte: monthStart },
-      model: { startsWith: "claude" },
-      conversation: { userId },
-    },
-  });
-  const inputTokens = agg._sum.inputTokens ?? 0;
-  const outputTokens = agg._sum.outputTokens ?? 0;
-  return { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens };
+
+  const [messages, analyses] = await Promise.all([
+    prisma.aIMessage.groupBy({
+      by: ["model"],
+      _sum: { inputTokens: true, outputTokens: true },
+      where: {
+        createdAt: { gte: monthStart },
+        conversation: { userId },
+      },
+    }),
+    prisma.aIAnalysis.groupBy({
+      by: ["model"],
+      _sum: { inputTokens: true, outputTokens: true },
+      where: {
+        generatedAt: { gte: monthStart },
+        userId,
+      },
+    }),
+  ]);
+
+  const perModel = new Map<string, { input: number; output: number }>();
+  function add(model: string | null, input: number | null, output: number | null) {
+    if (!model || (!input && !output)) return;
+    const slot = perModel.get(model) ?? { input: 0, output: 0 };
+    slot.input += input ?? 0;
+    slot.output += output ?? 0;
+    perModel.set(model, slot);
+  }
+  for (const r of messages) add(r.model, r._sum.inputTokens, r._sum.outputTokens);
+  for (const r of analyses) add(r.model, r._sum.inputTokens, r._sum.outputTokens);
+
+  const familyAgg = new Map<string, { input: number; output: number; cost: number }>();
+  let inputTokens = 0;
+  let outputTokens = 0;
+  let costUsd = 0;
+
+  for (const [model, tokens] of perModel) {
+    if (provider === "anthropic" && !/claude/i.test(model)) continue;
+    if (provider === "openai" && !/^(gpt|o1)/i.test(model)) continue;
+    const cost = computeCostUsd({
+      model,
+      inputTokens: tokens.input,
+      outputTokens: tokens.output,
+    });
+    const family = familyFor(model);
+    const slot = familyAgg.get(family) ?? { input: 0, output: 0, cost: 0 };
+    slot.input += tokens.input;
+    slot.output += tokens.output;
+    slot.cost += cost;
+    familyAgg.set(family, slot);
+    inputTokens += tokens.input;
+    outputTokens += tokens.output;
+    costUsd += cost;
+  }
+
+  const byFamily = Array.from(familyAgg.entries())
+    .map(([family, v]) => ({
+      family,
+      inputTokens: v.input,
+      outputTokens: v.output,
+      costUsd: v.cost,
+    }))
+    .sort((a, b) => b.costUsd - a.costUsd);
+
+  return {
+    inputTokens,
+    outputTokens,
+    totalTokens: inputTokens + outputTokens,
+    costUsd,
+    byFamily,
+    provider,
+  };
 }
 
 export async function clearConversation(id: string) {

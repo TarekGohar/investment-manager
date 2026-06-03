@@ -100,6 +100,8 @@ export async function Topbar({ title, backHref, rightSlot }: TopbarProps) {
           email={user.email}
           image={user.image}
           tokensThisMonth={tokenUsage?.totalTokens ?? 0}
+          costThisMonthUsd={tokenUsage?.costUsd ?? 0}
+          costBreakdown={tokenUsage?.byFamily}
         />
       ) : null}
 

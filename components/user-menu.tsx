@@ -4,17 +4,36 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { authClient } from "@/lib/auth-client";
 
+type UsageBreakdownItem = {
+  family: string;
+  inputTokens: number;
+  outputTokens: number;
+  costUsd: number;
+};
+
 type UserMenuProps = {
   name?: string | null;
   email: string;
   image?: string | null;
   /** Claude input + output tokens this app has spent for the user this month. */
   tokensThisMonth?: number;
+  /** USD spent on AI calls this calendar month, computed from token counts. */
+  costThisMonthUsd?: number;
+  /** Per-model-family breakdown for the expanded view. */
+  costBreakdown?: UsageBreakdownItem[];
 };
 
-export function UserMenu({ name, email, image, tokensThisMonth }: UserMenuProps) {
+export function UserMenu({
+  name,
+  email,
+  image,
+  tokensThisMonth,
+  costThisMonthUsd,
+  costBreakdown,
+}: UserMenuProps) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -75,15 +94,50 @@ export function UserMenu({ name, email, image, tokensThisMonth }: UserMenuProps)
             <div className="truncate text-sm font-semibold">{name ?? "Signed in"}</div>
             <div className="truncate text-xs text-muted">{email}</div>
           </div>
-          {typeof tokensThisMonth === "number" ? (
-            <div className="mt-1 rounded-[10px] px-3 py-2.5">
-              <div className="flex items-center justify-between gap-3">
-                <span className="text-sm font-medium text-text">Anthropic tokens</span>
-                <span className="text-sm tabular-nums text-text">
-                  {tokensThisMonth.toLocaleString()}
+          {typeof costThisMonthUsd === "number" ? (
+            <div className="mt-1 rounded-[10px] border border-border bg-bg/40 px-3 py-2.5">
+              <button
+                type="button"
+                onClick={() => setExpanded((v) => !v)}
+                className="flex w-full items-center justify-between gap-3 text-left"
+                aria-expanded={expanded}
+              >
+                <span className="text-sm font-medium text-text">Anthropic spend</span>
+                <span className="text-sm font-semibold tabular-nums text-text">
+                  {formatUsd(costThisMonthUsd)}
                 </span>
+              </button>
+              <div className="mt-0.5 flex items-center justify-between text-[11px] text-muted">
+                <span>this month</span>
+                {typeof tokensThisMonth === "number" && tokensThisMonth > 0 ? (
+                  <span className="tabular-nums">
+                    {compactTokens(tokensThisMonth)} tokens
+                  </span>
+                ) : null}
               </div>
-              <div className="mt-0.5 text-[11px] text-muted">used this month</div>
+
+              {expanded && costBreakdown && costBreakdown.length > 0 ? (
+                <div className="mt-2 space-y-1.5 border-t border-border pt-2">
+                  {costBreakdown.map((row) => (
+                    <div
+                      key={row.family}
+                      className="flex items-center justify-between gap-2 text-[12px]"
+                    >
+                      <span className="truncate text-muted">{row.family}</span>
+                      <span className="tabular-nums text-text">{formatUsd(row.costUsd)}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+
+              <a
+                href="https://console.anthropic.com/settings/billing"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-2 block text-[11px] font-medium text-brand-2 hover:underline"
+              >
+                Check balance in console →
+              </a>
             </div>
           ) : null}
           <button
@@ -99,4 +153,20 @@ export function UserMenu({ name, email, image, tokensThisMonth }: UserMenuProps)
       ) : null}
     </div>
   );
+}
+
+function formatUsd(value: number): string {
+  if (value === 0) return "$0.00";
+  if (value < 0.01) return "<$0.01";
+  return value.toLocaleString("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 2,
+  });
+}
+
+function compactTokens(value: number): string {
+  if (value < 1_000) return value.toLocaleString();
+  if (value < 1_000_000) return `${(value / 1_000).toFixed(value < 10_000 ? 1 : 0)}k`;
+  return `${(value / 1_000_000).toFixed(value < 10_000_000 ? 2 : 1)}M`;
 }
