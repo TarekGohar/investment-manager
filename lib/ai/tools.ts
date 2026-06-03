@@ -136,7 +136,7 @@ export function buildTools(userId: string): ToolDefinition[] {
     {
       name: "get_my_portfolio",
       description:
-        "The user's entire portfolio derived from their transaction ledger. Returns each holding with shares, avg cost, cost basis, market value, day change, unrealized P&L, plus totals across the book.",
+        "The user's entire portfolio derived from their transaction ledger. Returns each holding with shares, avg cost, cost basis (native + CAD), ACB for the non-reg pool, realized gain, dividends received, foreign tax withheld, per-account-kind breakdown (TFSA/RRSP/non-reg/etc.), market value, day change, unrealized P&L, plus totals across the book.",
       parameters: { type: "object", properties: {}, additionalProperties: false },
       execute: async () => {
         return await getEnrichedPortfolio(userId);
@@ -165,7 +165,7 @@ export function buildTools(userId: string): ToolDefinition[] {
     {
       name: "get_transaction_history",
       description:
-        "The user's transaction history for a ticker: each buy, sell, dividend, and split with date, quantity, price, fees.",
+        "The user's full transaction history for a ticker: every buy, sell, dividend, split, and corporate action with date, quantity, price, fees, and account kind. Returns ALL rows (full ledger is needed for ACB / superficial-loss / corporate-action analysis on long-held positions), most-recent first. Row IDs and null-valued metadata fields are omitted for density only — no analytical info is dropped.",
       parameters: {
         type: "object",
         properties: { ticker: { type: "string" } },
@@ -175,7 +175,35 @@ export function buildTools(userId: string): ToolDefinition[] {
       execute: async (input) => {
         const ticker = String(getProp(input, "ticker") ?? "").toUpperCase();
         if (!ticker) return { error: "Missing ticker." };
-        return await getTransactionHistory(userId, ticker);
+        const all = await getTransactionHistory(userId, ticker);
+        const sorted = all
+          .slice()
+          .sort((a, b) => b.occurredAt.getTime() - a.occurredAt.getTime());
+        return {
+          ticker,
+          count: sorted.length,
+          transactions: sorted.map((t) => {
+            const row: Record<string, unknown> = {
+              occurredAt: t.occurredAt.toISOString(),
+              kind: t.kind,
+              brokerageKind: t.brokerageKind,
+              currency: t.currency,
+              quantity: t.quantity,
+              price: t.price,
+              fees: t.fees,
+            };
+            if (t.fxRateToCad != null) row.fxRateToCad = t.fxRateToCad;
+            if (t.foreignTaxWithheld) row.foreignTaxWithheld = t.foreignTaxWithheld;
+            if (t.dividendType) row.dividendType = t.dividendType;
+            if (t.reasonCode) row.reasonCode = t.reasonCode;
+            if (t.isDrip) row.isDrip = true;
+            if (t.splitRatio != null) row.splitRatio = t.splitRatio;
+            if (t.maturesAt) row.maturesAt = t.maturesAt.toISOString();
+            if (t.corporateActionPayload) row.corporateAction = t.corporateActionPayload;
+            if (t.note) row.note = t.note;
+            return row;
+          }),
+        };
       },
     },
 

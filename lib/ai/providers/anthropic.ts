@@ -14,11 +14,20 @@ const DEFAULT_MAX_TOKENS = 4096;
 
 /**
  * Claude adapter. Streams with `messages.stream`, runs multi-round tool loops
- * the same way the OpenAI provider does, and marks the system message + tools
- * block with `cache_control: "ephemeral"` so the long PM persona and the
- * 20-tool definitions array get a 5-minute Anthropic cache hit. On chat turns
- * within a single conversation, that cuts the cached portion of input cost
- * by ~10×.
+ * the same way the OpenAI provider does, and marks three prefixes with
+ * `cache_control` so the input portion of repeat requests reads from
+ * Anthropic's prompt cache at $1.50/M instead of $15/M:
+ *
+ *   1. System prompt (persona + house style) — 1h TTL. Practically static.
+ *   2. Tools array (last definition) — 1h TTL. Caches all tool schemas.
+ *   3. Last message in the conversation — default 5min TTL. Caches the full
+ *      history through the current turn so the *next* turn (and subsequent
+ *      tool rounds within this turn) reads it as a cache hit. The 5min TTL
+ *      matches typical chat cadence; longer wouldn't help since this marker
+ *      gets replaced on every turn anyway.
+ *
+ * Anthropic allows up to 4 cache breakpoints per request. We use 3 and
+ * strip any stale dynamic markers on each round to stay within the cap.
  *
  * The `_params.signal` is wired into the SDK request via `signal` so aborting
  * the SSE stream client-side actually cancels the upstream call.
@@ -46,11 +55,16 @@ export class AnthropicProvider implements AiProvider {
   }: StreamChatParams): AsyncGenerator<StreamEvent> {
     const anthroMessages = toAnthropicMessages(messages);
     const anthroTools = tools.length > 0 ? toAnthropicTools(tools) : undefined;
+    // 1h TTL on the stable prefixes (system + tools). They almost never
+    // change between requests, so paying the higher write cost (2× vs
+    // 1.25× for the 5-min default) pays off after just a couple of cache
+    // reads — and the cache survives 12× longer, covering sporadic
+    // single-user sessions over a workday.
     const cachedSystem = [
       {
         type: "text" as const,
         text: system,
-        cache_control: { type: "ephemeral" as const },
+        cache_control: { type: "ephemeral" as const, ttl: "1h" as const },
       },
     ];
 
@@ -62,6 +76,8 @@ export class AnthropicProvider implements AiProvider {
 
     for (let round = 0; round < maxToolRounds; round++) {
       if (signal?.aborted) return;
+
+      markLastMessageForCache(anthroMessages);
 
       const stream = this.client.messages.stream(
         {
@@ -268,6 +284,51 @@ function toAnthropicMessages(history: ChatMessage[]): AnthropicMessageParam[] {
   return out;
 }
 
+/**
+ * Mark the last block of the last message with `cache_control: ephemeral`
+ * so the entire prior conversation (system + tools + history through this
+ * point) becomes a cached prefix. Anthropic reads the longest matching
+ * cached prefix on each request, so the next turn — and subsequent rounds
+ * of the same tool loop — bills the matched portion at $1.50/M.
+ *
+ * We strip prior dynamic markers first because the loop mutates
+ * `anthroMessages` across rounds: round 1 marks user_N, then round 2
+ * pushes assistant + tool_result, and we want the marker on the NEW last
+ * message — not accumulating past the 4-breakpoint cap.
+ */
+function markLastMessageForCache(messages: AnthropicMessageParam[]): void {
+  if (messages.length === 0) return;
+
+  for (const m of messages) {
+    if (Array.isArray(m.content)) {
+      for (const block of m.content) {
+        if (block && typeof block === "object" && "cache_control" in block) {
+          delete (block as { cache_control?: unknown }).cache_control;
+        }
+      }
+    }
+  }
+
+  const last = messages[messages.length - 1];
+
+  if (typeof last.content === "string") {
+    last.content = [
+      {
+        type: "text",
+        text: last.content,
+        cache_control: { type: "ephemeral" },
+      },
+    ] as Anthropic.MessageParam["content"];
+    return;
+  }
+  if (Array.isArray(last.content) && last.content.length > 0) {
+    const lastBlock = last.content[last.content.length - 1] as {
+      cache_control?: { type: "ephemeral" };
+    };
+    lastBlock.cache_control = { type: "ephemeral" };
+  }
+}
+
 function toAnthropicTools(tools: ToolDefinition[]): Anthropic.Messages.Tool[] {
   const out: Anthropic.Messages.Tool[] = tools.map((t) => ({
     name: t.name,
@@ -276,10 +337,16 @@ function toAnthropicTools(tools: ToolDefinition[]): Anthropic.Messages.Tool[] {
   }));
   // Mark the final tool's definition with cache_control. Anthropic caches
   // every preceding block up to and including the marked one — so this
-  // effectively caches the whole tools array.
+  // effectively caches the whole tools array. 1h TTL matches the system
+  // prompt; tools rarely change request-to-request.
   if (out.length > 0) {
-    (out[out.length - 1] as unknown as { cache_control: { type: "ephemeral" } }).cache_control = {
+    (
+      out[out.length - 1] as unknown as {
+        cache_control: { type: "ephemeral"; ttl: "1h" };
+      }
+    ).cache_control = {
       type: "ephemeral",
+      ttl: "1h",
     };
   }
   return out;
