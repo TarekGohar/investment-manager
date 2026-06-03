@@ -50,6 +50,7 @@ All variables live in `.env.local` (gitignored). The minimum you need to boot th
 | `AZURE_OPENAI_DEPLOYMENT` | If `AI_PROVIDER=azure-openai` | Deployment name (used as `AI_MODEL` fallback) |
 | `AZURE_OPENAI_API_VERSION` | No | Defaults to `2024-10-21` |
 | `FINNHUB_API_KEY` | Yes (for prices) | Without it, everything reads cached or empty data |
+| `ALPHAVANTAGE_API_KEY` | No | Enables earnings-call transcripts in the AI chat (`get_earnings_call_transcript`). Free key at [alphavantage.co](https://www.alphavantage.co/support/#api-key); US companies only. Without it, the transcript tool returns "unavailable" |
 | `CRON_SECRET` | For cron in prod | Random 64-hex string. Generate with `openssl rand -hex 32`. Vercel Cron sends this as `Authorization: Bearer <secret>` |
 | `MAILGUN_API_KEY` | No | Optional — without it, magic-link + alert emails print to console |
 | `MAILGUN_DOMAIN` | No | e.g. `mg.yourdomain.com` |

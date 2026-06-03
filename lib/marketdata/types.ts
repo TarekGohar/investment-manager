@@ -75,3 +75,23 @@ export type Candle = {
   close: number;
   volume: number;
 };
+
+/** One speaker turn within an earnings call. */
+export type TranscriptSegment = {
+  speaker: string;
+  /** Speaker's role/title, e.g. "CEO & Director". May be empty. */
+  title: string;
+  content: string;
+  /** Provider sentiment score for this segment, as a string (e.g. "0.6"). */
+  sentiment: string | null;
+};
+
+/** A full earnings-call transcript for one fiscal quarter. */
+export type EarningsTranscript = {
+  ticker: string;
+  /** Fiscal quarter, e.g. "2024Q1". */
+  quarter: string;
+  title: string | null;
+  segments: TranscriptSegment[];
+  source: string;
+};

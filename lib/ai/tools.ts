@@ -1,5 +1,10 @@
 import "server-only";
-import { getFundamentals, getNews, getQuote } from "@/lib/marketdata";
+import {
+  getEarningsTranscript,
+  getFundamentals,
+  getNews,
+  getQuote,
+} from "@/lib/marketdata";
 import {
   getEnrichedPortfolio,
   getHolding,
@@ -656,6 +661,76 @@ export function buildTools(userId: string): ToolDefinition[] {
             filedAt: f.filedAt.toISOString(),
             ageDays: Math.floor((now - f.filedAt.getTime()) / dayMs),
           })),
+        };
+      },
+    },
+
+    {
+      name: "get_earnings_call_transcript",
+      description:
+        "Earnings-call transcript for a US ticker, segmented by speaker with per-segment sentiment. Use this to ground commentary on what management actually said — guidance, margins, demand, capital allocation, analyst Q&A. Omit `quarter` for the most recent reported call, or pass one like \"2024Q1\". Returns null/error for Canadian-listed names (not covered) or when no transcript is available yet. Long transcripts are truncated (see `truncated`); call again with an earlier `quarter` for prior calls.",
+      parameters: {
+        type: "object",
+        properties: {
+          ticker: { type: "string", description: "US stock ticker, e.g. AAPL, NVDA." },
+          quarter: {
+            type: "string",
+            description: 'Fiscal quarter in YYYYQ[1-4] form, e.g. "2024Q1". Optional.',
+          },
+        },
+        required: ["ticker"],
+        additionalProperties: false,
+      },
+      execute: async (input) => {
+        const ticker = String(getProp(input, "ticker") ?? "").toUpperCase();
+        if (!ticker) return { error: "Missing ticker." };
+        const quarterRaw = getProp(input, "quarter");
+        const quarter = quarterRaw != null ? String(quarterRaw) : undefined;
+
+        const transcript = await getEarningsTranscript(ticker, quarter);
+        if (!transcript) {
+          return {
+            error: `No earnings call transcript available for ${ticker}${
+              quarter ? ` ${quarter}` : ""
+            }. Transcripts cover US-listed companies and may be unavailable for very recent or not-yet-reported quarters.`,
+          };
+        }
+
+        // Cap total returned text so a single call can't blow up the context.
+        // Prepared remarks lead the transcript, so truncation drops the tail of
+        // the analyst Q&A first — the model can request an earlier quarter or be
+        // told the call ran long.
+        const CHAR_BUDGET = 36_000;
+        let used = 0;
+        let truncated = false;
+        const segments: Array<{
+          speaker: string;
+          title: string;
+          sentiment: string | null;
+          content: string;
+        }> = [];
+        for (const s of transcript.segments) {
+          if (used + s.content.length > CHAR_BUDGET) {
+            truncated = true;
+            break;
+          }
+          used += s.content.length;
+          segments.push({
+            speaker: s.speaker,
+            title: s.title,
+            sentiment: s.sentiment,
+            content: s.content,
+          });
+        }
+
+        return {
+          ticker: transcript.ticker,
+          quarter: transcript.quarter,
+          source: transcript.source,
+          totalSegments: transcript.segments.length,
+          returnedSegments: segments.length,
+          truncated,
+          segments,
         };
       },
     },

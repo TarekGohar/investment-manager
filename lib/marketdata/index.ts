@@ -7,10 +7,20 @@ import {
   fetchIntraday1D,
   fetchIntraday1W,
 } from "./yahoo";
+import { fetchEarningsTranscript } from "./alphavantage";
 import { tmxGetQuote, tmxGetNews } from "./tmx";
 import { cseGetQuote } from "./cse";
 import { cisionDeriveSlug, cisionListReleases, type CisionRelease } from "./cision";
-import type { Candle, ExtendedHours, Fundamentals, NewsItem, Quote } from "./types";
+import type {
+  Candle,
+  EarningsTranscript,
+  ExtendedHours,
+  Fundamentals,
+  NewsItem,
+  Quote,
+  TranscriptSegment,
+} from "./types";
+import type { Prisma } from "@/generated/prisma";
 
 /**
  * Tickers Finnhub's free tier doesn't cover return 403. Detect listing
@@ -45,7 +55,16 @@ export function quoteCurrencyForTicker(ticker: string): "USD" | "CAD" {
   return "USD";
 }
 
-export type { Candle, ExtendedHours, Fundamentals, MarketState, NewsItem, Quote } from "./types";
+export type {
+  Candle,
+  EarningsTranscript,
+  ExtendedHours,
+  Fundamentals,
+  MarketState,
+  NewsItem,
+  Quote,
+  TranscriptSegment,
+} from "./types";
 
 const TTL = {
   quote: 60 * 1000, // 1 minute
@@ -532,4 +551,98 @@ export async function getIntradayCandles(
     console.error(`[marketdata] intraday ${range} fetch failed for ${sym}:`, err);
     return [];
   }
+}
+
+// ─── Earnings call transcripts ────────────────────────────────────────────
+
+/** Normalize a quarter string to canonical `YYYYQ[1-4]`, or null if unparseable. */
+function normalizeQuarter(raw: string): string | null {
+  const m = raw.trim().toUpperCase().match(/^(\d{4})\s*Q?\s*([1-4])$/);
+  if (!m) return null;
+  return `${m[1]}Q${m[2]}`;
+}
+
+/**
+ * The `n` most-recently *reported* fiscal quarters, newest first. Earnings
+ * calls lag the quarter end by several weeks, so we offset ~10 weeks before
+ * mapping a date to its calendar quarter — that lands us on the quarter a
+ * company has most likely already reported.
+ */
+function recentReportedQuarters(n: number): string[] {
+  const ref = new Date(Date.now() - 70 * 86_400_000);
+  let year = ref.getUTCFullYear();
+  let q = Math.floor(ref.getUTCMonth() / 3) + 1; // 1..4
+  const out: string[] = [];
+  for (let i = 0; i < n; i++) {
+    out.push(`${year}Q${q}`);
+    q -= 1;
+    if (q < 1) {
+      q = 4;
+      year -= 1;
+    }
+  }
+  return out;
+}
+
+function deserializeTranscript(row: {
+  ticker: string;
+  quarter: string;
+  title: string | null;
+  segments: Prisma.JsonValue;
+  source: string;
+}): EarningsTranscript {
+  const segments = Array.isArray(row.segments)
+    ? (row.segments as unknown as TranscriptSegment[])
+    : [];
+  return {
+    ticker: row.ticker,
+    quarter: row.quarter,
+    title: row.title,
+    segments,
+    source: row.source,
+  };
+}
+
+/**
+ * Earnings-call transcript for a US ticker, sourced from Alpha Vantage and
+ * cached forever (transcripts are immutable once the call has happened). With
+ * no `quarter`, walks back from the most-recently-reported quarter until a
+ * transcript is found. Canadian listings aren't covered by the provider and
+ * return null.
+ */
+export async function getEarningsTranscript(
+  ticker: string,
+  quarter?: string,
+): Promise<EarningsTranscript | null> {
+  const sym = ticker.toUpperCase();
+  if (!isTradeableTicker(sym)) return null;
+  if (listingFromTicker(sym) !== "US_OR_UNKNOWN") return null;
+
+  const quarters = quarter
+    ? [normalizeQuarter(quarter)].filter((q): q is string => q != null)
+    : recentReportedQuarters(4);
+
+  for (const q of quarters) {
+    const cached = await prisma.transcript.findUnique({
+      where: { ticker_quarter: { ticker: sym, quarter: q } },
+    });
+    if (cached) return deserializeTranscript(cached);
+
+    const fresh = await fetchEarningsTranscript(sym, q);
+    if (fresh && fresh.segments.length > 0) {
+      const stored = await prisma.transcript.upsert({
+        where: { ticker_quarter: { ticker: sym, quarter: q } },
+        create: {
+          ticker: sym,
+          quarter: q,
+          title: fresh.title,
+          segments: fresh.segments as unknown as Prisma.InputJsonValue,
+          source: fresh.source,
+        },
+        update: {}, // immutable — never overwrite a cached transcript
+      });
+      return deserializeTranscript(stored);
+    }
+  }
+  return null;
 }

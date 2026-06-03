@@ -406,6 +406,22 @@ model Candle {
   @@map("candle")
 }
 
+/// Earnings-call transcript cache. Populated on-demand by lib/marketdata from
+/// Alpha Vantage's EARNINGS_CALL_TRANSCRIPT endpoint. Transcripts are immutable
+/// once a call has happened, so cached rows are valid forever (no TTL).
+model Transcript {
+  ticker    String
+  quarter   String // fiscal quarter, e.g. "2024Q1"
+  title     String?
+  /// Speaker-segmented transcript: [{ speaker, title, content, sentiment }]
+  segments  Json
+  source    String   @default("alphavantage")
+  fetchedAt DateTime @default(now())
+
+  @@id([ticker, quarter])
+  @@map("transcript")
+}
+
 /// CAD-denominated FX rate cache, keyed by (currency, calendar date UTC).
 /// Populated on-demand by lib/marketdata/fx.ts from the Bank of Canada Valet
 /// API. Historical rates never change so cached rows are valid forever.
