@@ -113,7 +113,9 @@ export async function generateAnnualReview(args: {
   const provider = getProvider();
   const model = getModel("deep");
   let body = "";
-  let usage: { inputTokens: number; outputTokens: number } | undefined;
+  let usage:
+    | { inputTokens: number; outputTokens: number; cachedTokens?: number; cacheCreationTokens?: number }
+    | undefined;
 
   for await (const ev of provider.streamChat({
     model,
@@ -148,6 +150,8 @@ export async function generateAnnualReview(args: {
       },
       model,
       inputTokens: usage?.inputTokens,
+      cachedTokens: usage?.cachedTokens,
+      cacheCreationTokens: usage?.cacheCreationTokens,
       outputTokens: usage?.outputTokens,
     },
     select: { id: true },

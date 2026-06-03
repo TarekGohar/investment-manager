@@ -55,9 +55,18 @@ export type StreamEvent =
   | { type: "error"; error: string };
 
 export type TokenUsage = {
+  /**
+   * Uncached input tokens — the portion billed at full input rate. For
+   * providers without prompt caching this is the entire input. For
+   * Anthropic this excludes both `cachedTokens` (cache reads, billed at
+   * ~10%) and `cacheCreationTokens` (cache writes, billed at 1.25–2×).
+   */
   inputTokens: number;
   outputTokens: number;
+  /** Cache-read input tokens (Anthropic). Billed at 10% of input rate. */
   cachedTokens?: number;
+  /** Cache-write input tokens (Anthropic). Billed at 1.25× (5min TTL) or 2× (1h TTL) of input rate. */
+  cacheCreationTokens?: number;
 };
 
 export type StreamChatParams = {

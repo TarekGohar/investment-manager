@@ -70,9 +70,12 @@ export class AnthropicProvider implements AiProvider {
 
     let finalText = "";
     const finalToolCalls: ToolCall[] = [];
-    let lastUsage:
-      | { inputTokens: number; outputTokens: number; cachedTokens?: number }
-      | undefined;
+    // Accumulate token usage across tool rounds — Anthropic reports per
+    // round, but the caller needs a single per-turn total for billing.
+    let aggInput = 0;
+    let aggCached = 0;
+    let aggCacheCreation = 0;
+    let aggOutput = 0;
 
     for (let round = 0; round < maxToolRounds; round++) {
       if (signal?.aborted) return;
@@ -126,14 +129,10 @@ export class AnthropicProvider implements AiProvider {
                 cache_read_input_tokens?: number;
                 cache_creation_input_tokens?: number;
               };
-              lastUsage = {
-                inputTokens:
-                  (u.input_tokens ?? 0) +
-                  (u.cache_read_input_tokens ?? 0) +
-                  (u.cache_creation_input_tokens ?? 0),
-                outputTokens: u.output_tokens ?? 0,
-                cachedTokens: u.cache_read_input_tokens,
-              };
+              aggInput += u.input_tokens ?? 0;
+              aggCached += u.cache_read_input_tokens ?? 0;
+              aggCacheCreation += u.cache_creation_input_tokens ?? 0;
+              aggOutput += u.output_tokens ?? 0;
             }
           }
         }
@@ -149,7 +148,12 @@ export class AnthropicProvider implements AiProvider {
           type: "done",
           finalText,
           finalToolCalls,
-          usage: lastUsage,
+          usage: {
+            inputTokens: aggInput,
+            outputTokens: aggOutput,
+            cachedTokens: aggCached,
+            cacheCreationTokens: aggCacheCreation,
+          },
           model,
           finishReason: stopReason,
         };

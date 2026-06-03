@@ -104,7 +104,16 @@ async function generateAnalysis(args: {
   portfolio: EnrichedPortfolio;
   priorAnalysisLabel: string;
 }): Promise<
-  | { body: string; tokens?: { input: number; output: number }; skipped?: false }
+  | {
+      body: string;
+      tokens?: {
+        input: number;
+        output: number;
+        cached?: number;
+        cacheCreation?: number;
+      };
+      skipped?: false;
+    }
   | { skipped: true }
   | null
 > {
@@ -131,7 +140,9 @@ async function generateAnalysis(args: {
   const userMessage = `${context}\n\n${args.task}\n\nPortfolio snapshot:\n${snapshot}`;
 
   let body = "";
-  let usage: { inputTokens: number; outputTokens: number } | undefined;
+  let usage:
+    | { inputTokens: number; outputTokens: number; cachedTokens?: number; cacheCreationTokens?: number }
+    | undefined;
 
   for await (const ev of provider.streamChat({
     model,
@@ -150,7 +161,14 @@ async function generateAnalysis(args: {
   if (isNoReviewSentinel(trimmed)) return { skipped: true };
   return {
     body: trimmed,
-    tokens: usage ? { input: usage.inputTokens, output: usage.outputTokens } : undefined,
+    tokens: usage
+      ? {
+          input: usage.inputTokens,
+          output: usage.outputTokens,
+          cached: usage.cachedTokens,
+          cacheCreation: usage.cacheCreationTokens,
+        }
+      : undefined,
   };
 }
 
@@ -186,6 +204,8 @@ export async function generateDailyReview(userId: string): Promise<string | null
       },
       model: getModel("review"),
       inputTokens: result.tokens?.input,
+      cachedTokens: result.tokens?.cached,
+      cacheCreationTokens: result.tokens?.cacheCreation,
       outputTokens: result.tokens?.output,
     },
     select: { id: true },
@@ -221,6 +241,8 @@ export async function generateWeeklyReview(userId: string): Promise<string | nul
       },
       model: getModel("review"),
       inputTokens: result.tokens?.input,
+      cachedTokens: result.tokens?.cached,
+      cacheCreationTokens: result.tokens?.cacheCreation,
       outputTokens: result.tokens?.output,
     },
     select: { id: true },

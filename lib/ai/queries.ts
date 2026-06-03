@@ -172,6 +172,8 @@ export async function saveAssistantMessage(
     toolCalls?: ToolCall[];
     model?: string;
     inputTokens?: number;
+    cachedTokens?: number;
+    cacheCreationTokens?: number;
     outputTokens?: number;
   },
 ) {
@@ -185,6 +187,8 @@ export async function saveAssistantMessage(
       } as Prisma.InputJsonValue,
       model: payload.model,
       inputTokens: payload.inputTokens,
+      cachedTokens: payload.cachedTokens,
+      cacheCreationTokens: payload.cacheCreationTokens,
       outputTokens: payload.outputTokens,
     },
   });
@@ -274,7 +278,12 @@ export async function getMonthlyTokenUsage(
   const [messages, analyses] = await Promise.all([
     prisma.aIMessage.groupBy({
       by: ["model"],
-      _sum: { inputTokens: true, outputTokens: true },
+      _sum: {
+        inputTokens: true,
+        cachedTokens: true,
+        cacheCreationTokens: true,
+        outputTokens: true,
+      },
       where: {
         createdAt: { gte: monthStart },
         conversation: { userId },
@@ -282,7 +291,12 @@ export async function getMonthlyTokenUsage(
     }),
     prisma.aIAnalysis.groupBy({
       by: ["model"],
-      _sum: { inputTokens: true, outputTokens: true },
+      _sum: {
+        inputTokens: true,
+        cachedTokens: true,
+        cacheCreationTokens: true,
+        outputTokens: true,
+      },
       where: {
         generatedAt: { gte: monthStart },
         userId,
@@ -290,16 +304,32 @@ export async function getMonthlyTokenUsage(
     }),
   ]);
 
-  const perModel = new Map<string, { input: number; output: number }>();
-  function add(model: string | null, input: number | null, output: number | null) {
-    if (!model || (!input && !output)) return;
-    const slot = perModel.get(model) ?? { input: 0, output: 0 };
-    slot.input += input ?? 0;
-    slot.output += output ?? 0;
+  type Bucket = { input: number; cached: number; cacheCreation: number; output: number };
+  const perModel = new Map<string, Bucket>();
+  function add(
+    model: string | null,
+    sums: {
+      inputTokens: number | null;
+      cachedTokens: number | null;
+      cacheCreationTokens: number | null;
+      outputTokens: number | null;
+    },
+  ) {
+    if (!model) return;
+    const i = sums.inputTokens ?? 0;
+    const c = sums.cachedTokens ?? 0;
+    const w = sums.cacheCreationTokens ?? 0;
+    const o = sums.outputTokens ?? 0;
+    if (i + c + w + o === 0) return;
+    const slot = perModel.get(model) ?? { input: 0, cached: 0, cacheCreation: 0, output: 0 };
+    slot.input += i;
+    slot.cached += c;
+    slot.cacheCreation += w;
+    slot.output += o;
     perModel.set(model, slot);
   }
-  for (const r of messages) add(r.model, r._sum.inputTokens, r._sum.outputTokens);
-  for (const r of analyses) add(r.model, r._sum.inputTokens, r._sum.outputTokens);
+  for (const r of messages) add(r.model, r._sum);
+  for (const r of analyses) add(r.model, r._sum);
 
   const familyAgg = new Map<string, { input: number; output: number; cost: number }>();
   let inputTokens = 0;
@@ -312,15 +342,20 @@ export async function getMonthlyTokenUsage(
     const cost = computeCostUsd({
       model,
       inputTokens: tokens.input,
+      cachedTokens: tokens.cached,
+      cacheCreationTokens: tokens.cacheCreation,
       outputTokens: tokens.output,
     });
     const family = familyFor(model);
     const slot = familyAgg.get(family) ?? { input: 0, output: 0, cost: 0 };
-    slot.input += tokens.input;
+    // Aggregate "input" for the breakdown rolls all three input buckets
+    // (uncached + cached + cache-write) so the UI's "tokens" total matches
+    // what the provider's console reports as input.
+    slot.input += tokens.input + tokens.cached + tokens.cacheCreation;
     slot.output += tokens.output;
     slot.cost += cost;
     familyAgg.set(family, slot);
-    inputTokens += tokens.input;
+    inputTokens += tokens.input + tokens.cached + tokens.cacheCreation;
     outputTokens += tokens.output;
     costUsd += cost;
   }

@@ -589,11 +589,17 @@ model AIMessage {
   // Structured content: { text: string, toolCalls?: [...], toolResults?: [...] }
   // For user messages: { text }. For assistant: { text, toolCalls? }. For tool: { toolCallId, name, result }.
   content        Json
-  // Token usage on assistant messages (for cost telemetry)
-  inputTokens    Int?
-  outputTokens   Int?
-  model          String?
-  createdAt      DateTime @default(now())
+  // Token usage on assistant messages (for cost telemetry).
+  // `inputTokens` is the *uncached* portion — the part billed at full input
+  // rate. `cachedTokens` and `cacheCreationTokens` are billed at separate
+  // rates (10% read / ~1.5× write on Anthropic). Splitting them is required
+  // to match the figure shown in the provider's billing console.
+  inputTokens         Int?
+  cachedTokens        Int?
+  cacheCreationTokens Int?
+  outputTokens        Int?
+  model               String?
+  createdAt           DateTime @default(now())
 
   conversation AIConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 
@@ -832,10 +838,12 @@ model AIAnalysis {
   body         String
   // Snapshot of the metrics the review was written against
   metrics      Json?
-  model        String?
-  inputTokens  Int?
-  outputTokens Int?
-  generatedAt  DateTime     @default(now())
+  model               String?
+  inputTokens         Int?
+  cachedTokens        Int?
+  cacheCreationTokens Int?
+  outputTokens        Int?
+  generatedAt         DateTime @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 

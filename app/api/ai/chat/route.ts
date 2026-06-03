@@ -69,7 +69,14 @@ export async function POST(req: Request) {
       let finalText = "";
       let finalToolCalls: ToolCall[] = [];
       const toolMeta = new Map<string, { name: string; result: string }>();
-      let usage: { inputTokens: number; outputTokens: number } | undefined;
+      let usage:
+        | {
+            inputTokens: number;
+            outputTokens: number;
+            cachedTokens?: number;
+            cacheCreationTokens?: number;
+          }
+        | undefined;
       let finishReason: string | undefined;
 
       try {
@@ -136,6 +143,8 @@ export async function POST(req: Request) {
             toolCalls: finalToolCalls,
             model,
             inputTokens: usage?.inputTokens,
+            cachedTokens: usage?.cachedTokens,
+            cacheCreationTokens: usage?.cacheCreationTokens,
             // Attribute output tokens to the reply message below; this
             // intermediate "calls" message has no text output of its own.
           });
@@ -147,13 +156,16 @@ export async function POST(req: Request) {
           }
         }
         if (finalText) {
+          const hasCalls = finalToolCalls.length > 0;
           await saveAssistantMessage(conversation.id, {
             text: finalText,
             toolCalls: undefined,
             model,
             // Input tokens are attributed to the calls message above
             // (where they were actually spent). Output goes here.
-            inputTokens: finalToolCalls.length > 0 ? undefined : usage?.inputTokens,
+            inputTokens: hasCalls ? undefined : usage?.inputTokens,
+            cachedTokens: hasCalls ? undefined : usage?.cachedTokens,
+            cacheCreationTokens: hasCalls ? undefined : usage?.cacheCreationTokens,
             outputTokens: usage?.outputTokens,
           });
         }
