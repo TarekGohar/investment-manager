@@ -129,15 +129,6 @@ export function UserMenu({
                   ))}
                 </div>
               ) : null}
-
-              <a
-                href="https://console.anthropic.com/settings/billing"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="mt-2 block text-[11px] font-medium text-brand-2 hover:underline"
-              >
-                Check balance in console →
-              </a>
             </div>
           ) : null}
           <button
