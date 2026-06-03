@@ -89,7 +89,10 @@ export default async function ChatPage({
   const hasHistory = initialMessages.length > 0;
 
   return (
-    <>
+    // Fixed-height flex column that fills the visible viewport. The parent app
+    // layout already pads the bottom safe area, so subtract it here to avoid
+    // overflowing the viewport (which would push the chat input bar off-screen).
+    <div className="flex h-[calc(100dvh-env(safe-area-inset-bottom))] flex-col">
       <Topbar
         title={isPortfolio ? "AI Chat" : `Ask PM · ${scope}`}
         backHref={isPortfolio ? undefined : `/positions/${scope}`}
@@ -100,7 +103,7 @@ export default async function ChatPage({
           </div>
         }
       />
-      <div className="flex">
+      <div className="flex min-h-0 flex-1">
         <ConversationsSidebar
           conversations={conversations}
           currentId={active?.id ?? null}
@@ -115,6 +118,6 @@ export default async function ChatPage({
           />
         </div>
       </div>
-    </>
+    </div>
   );
 }

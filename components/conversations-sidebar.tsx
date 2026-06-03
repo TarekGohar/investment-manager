@@ -39,7 +39,7 @@ export function ConversationsSidebar({
   }
 
   return (
-    <aside className="sticky top-[72px] hidden h-[calc(100vh-72px)] w-[260px] shrink-0 flex-col border-r border-border bg-bg lg:flex">
+    <aside className="hidden h-full w-[260px] shrink-0 flex-col border-r border-border bg-bg lg:flex">
       <div className="border-b border-border p-3">
         <button
           type="button"
