@@ -2,7 +2,7 @@ import { headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { Topbar } from "@/components/topbar";
 import { PositionChart } from "@/components/position-chart";
-import { PositionTabs, type PositionTab } from "@/components/position-tabs";
+import { Tabs, type Tab } from "@/components/tabs";
 import { TransactionForm } from "@/components/transaction-form";
 import { TransactionsList } from "@/components/transactions-list";
 import { auth } from "@/lib/auth";
@@ -465,7 +465,7 @@ export default async function PositionPage({
 
   const thesisSection = <ThesisCard ticker={ticker} initial={thesis} />;
 
-  const tabs: PositionTab[] = [{ key: "Overview", content: overview }];
+  const tabs: Tab[] = [{ key: "Overview", content: overview }];
   tabs.push({ key: "Thesis", content: thesisSection });
   if (newsSection) tabs.push({ key: "News", content: newsSection });
   if (fundamentalsSection) tabs.push({ key: "Fundamentals", content: fundamentalsSection });
@@ -488,7 +488,7 @@ export default async function PositionPage({
             watched={watched}
           />
 
-          <PositionTabs tabs={tabs} />
+          <Tabs tabs={tabs} />
         </section>
 
         <aside className="w-full lg:w-[400px] lg:shrink-0">

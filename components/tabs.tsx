@@ -3,29 +3,20 @@
 import { useState } from "react";
 import type { ReactNode } from "react";
 
-export type PositionTabKey =
-  | "Overview"
-  | "Thesis"
-  | "News"
-  | "Fundamentals"
-  | "Filings"
-  | "Transactions"
-  | "Tax";
-
-export type PositionTab = {
-  key: PositionTabKey;
+export type Tab = {
+  key: string;
   content: ReactNode;
 };
 
-export function PositionTabs({
+export function Tabs({
   tabs,
   defaultTab,
 }: {
-  tabs: PositionTab[];
-  defaultTab?: PositionTabKey;
+  tabs: Tab[];
+  defaultTab?: string;
 }) {
   const initial = defaultTab && tabs.some((t) => t.key === defaultTab) ? defaultTab : tabs[0]?.key;
-  const [active, setActive] = useState<PositionTabKey | undefined>(initial);
+  const [active, setActive] = useState<string | undefined>(initial);
 
   if (tabs.length === 0) return null;
 
