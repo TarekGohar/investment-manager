@@ -6,7 +6,9 @@ import { TickerBadge } from "@/components/ticker-badge";
 import { LocationBadge } from "@/components/location-badge";
 import { PortfolioIcon, PlusIcon } from "@/components/icons";
 import { auth } from "@/lib/auth";
-import { getEnrichedPortfolio } from "@/lib/portfolio/queries";
+import { getEnrichedPortfolio, listTransactions } from "@/lib/portfolio/queries";
+import { getUpcomingDividends } from "@/lib/portfolio/dividend-calendar";
+import { UpcomingDividends } from "@/components/upcoming-dividends";
 import { analyzePortfolioLocation } from "@/lib/canadian/location";
 import { getCorrelationMatrix } from "@/lib/portfolio/performance-summary";
 import { CorrelationHeatmap } from "@/components/correlation-heatmap";
@@ -50,10 +52,21 @@ export default async function PortfolioPage() {
   // CAD-convert cash totals so the net-worth card sums apples-to-apples
   // with the asset totals. One FX call (cached) covers everything.
   const cashCurrencies = Object.keys(cashSummary.totalsByCurrency);
-  const needsUsdToCad = cashCurrencies.includes("USD");
+  const needsUsdToCad =
+    cashCurrencies.includes("USD") ||
+    portfolio.holdings.some((h) => h.currency !== "CAD");
   const usdToCadRate = needsUsdToCad
     ? ((await getFxRateToCad("USD", new Date()))?.rate ?? null)
     : null;
+
+  const upcomingDividends =
+    portfolio.holdings.length > 0
+      ? await getUpcomingDividends({
+          holdings: portfolio.holdings,
+          transactions: await listTransactions(session.user.id),
+          usdToCadRate,
+        })
+      : [];
   let cashCad = 0;
   for (const [ccy, amount] of Object.entries(cashSummary.totalsByCurrency)) {
     if (ccy === "CAD") cashCad += amount;
@@ -242,6 +255,12 @@ export default async function PortfolioPage() {
         {portfolio.holdings.length > 0 ? (
           <div className="mt-[26px]">
             <PortfolioByAccount portfolio={portfolio} brokerages={brokerageInfo} />
+          </div>
+        ) : null}
+
+        {upcomingDividends.length > 0 ? (
+          <div className="mt-[26px]">
+            <UpcomingDividends dividends={upcomingDividends} />
           </div>
         ) : null}
 
