@@ -80,8 +80,8 @@ function Item({ item }: { item: OpenRecommendation }) {
   }
 
   return (
-    <li className="flex flex-wrap items-start justify-between gap-3 px-6 py-3.5">
-      <div className="min-w-0 flex-1">
+    <li className="flex flex-col gap-3 px-6 py-3.5 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between">
+      <div className="min-w-0 sm:flex-1">
         <div className="mb-1 flex items-center gap-2">
           {pill ? (
             <span
