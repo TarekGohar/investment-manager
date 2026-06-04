@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { createChatAction } from "@/app/actions/chat";
 import type { ConversationSummary } from "@/lib/ai/queries";
 
@@ -129,6 +129,28 @@ export function ChatMenu({
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  // The menu opens upward from a button near the bottom of the screen, so cap
+  // its height to the space actually above the trigger — otherwise a long
+  // recent-chats list spills off the top of the viewport and can't be reached.
+  const [maxHeight, setMaxHeight] = useState<number | undefined>(undefined);
+
+  useEffect(() => {
+    if (!open) return;
+    function measure() {
+      const el = triggerRef.current;
+      if (!el) return;
+      // top of trigger, minus the mb-2 gap and a small breathing margin.
+      setMaxHeight(Math.max(180, el.getBoundingClientRect().top - 16));
+    }
+    measure();
+    window.addEventListener("resize", measure);
+    window.addEventListener("scroll", measure, true);
+    return () => {
+      window.removeEventListener("resize", measure);
+      window.removeEventListener("scroll", measure, true);
+    };
+  }, [open]);
 
   function newChat() {
     if (pending) return;
@@ -151,7 +173,9 @@ export function ChatMenu({
             onClick={() => setOpen(false)}
             className="fixed inset-0 z-20 cursor-default"
           />
-          <div className="absolute bottom-full left-0 z-30 mb-2 flex max-h-[60vh] w-[min(280px,calc(100vw-2rem))] flex-col overflow-hidden rounded-[16px] border border-border bg-bg shadow-xl">
+          <div
+            style={maxHeight ? { maxHeight } : undefined}
+            className="absolute bottom-full left-0 z-30 mb-2 flex max-h-[70dvh] w-[min(280px,calc(100vw-2rem))] flex-col overflow-hidden rounded-[16px] border border-border bg-bg shadow-xl">
             <div className="border-b border-border p-2">
               <button
                 type="button"
@@ -162,7 +186,7 @@ export function ChatMenu({
                 {pending ? "Creating…" : "+ New chat"}
               </button>
             </div>
-            <div className="min-h-0 flex-1 overflow-y-auto p-2">
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-2">
               {conversations.length === 0 ? (
                 <div className="px-3 py-4 text-xs text-muted">
                   No conversations yet.
@@ -182,6 +206,7 @@ export function ChatMenu({
         </>
       )}
       <button
+        ref={triggerRef}
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
