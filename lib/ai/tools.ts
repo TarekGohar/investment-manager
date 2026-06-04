@@ -1,9 +1,11 @@
 import "server-only";
 import {
   getEarningsTranscript,
+  getFinancialStatements,
   getFundamentals,
   getNews,
   getQuote,
+  getTickerInsights,
 } from "@/lib/marketdata";
 import {
   getEnrichedPortfolio,
@@ -731,6 +733,157 @@ export function buildTools(userId: string): ToolDefinition[] {
           returnedSegments: segments.length,
           truncated,
           segments,
+        };
+      },
+    },
+
+    {
+      name: "get_analyst_view",
+      description:
+        "Wall Street view + valuation/quality snapshot for a ticker (US or Canadian), from Yahoo. Returns analyst price targets (mean/high/low) and how they compare to the current price, consensus recommendation + the strong-buy→sell trend, recent upgrades/downgrades, valuation multiples (P/E, forward P/E, PEG, P/B, P/S, EV/EBITDA), margins, ROE, growth, balance-sheet health, beta, and short interest. Margins/growth/short-float are percentages. Use for 'what does the Street think', valuation, and crowding/short-squeeze risk.",
+      parameters: {
+        type: "object",
+        properties: { ticker: { type: "string" } },
+        required: ["ticker"],
+        additionalProperties: false,
+      },
+      execute: async (input) => {
+        const ticker = String(getProp(input, "ticker") ?? "").toUpperCase();
+        if (!ticker) return { error: "Missing ticker." };
+        const i = await getTickerInsights(ticker);
+        if (!i) return { error: `No analyst/valuation data available for ${ticker}.` };
+        const upside =
+          i.targetMean != null && i.currentPrice
+            ? ((i.targetMean - i.currentPrice) / i.currentPrice) * 100
+            : null;
+        return {
+          ticker: i.ticker,
+          source: i.source,
+          currentPrice: i.currentPrice,
+          analyst: {
+            targetMean: i.targetMean,
+            targetHigh: i.targetHigh,
+            targetLow: i.targetLow,
+            upsideToMeanPct: upside,
+            numberOfAnalysts: i.numberOfAnalysts,
+            recommendationKey: i.recommendationKey,
+            recommendationMean: i.recommendationMean,
+            recommendationTrend: i.recommendationTrend,
+            recentActions: i.recentActions.map((a) => ({
+              firm: a.firm,
+              from: a.fromGrade,
+              to: a.toGrade,
+              action: a.action,
+              date: a.date ? a.date.toISOString().slice(0, 10) : null,
+            })),
+          },
+          valuation: {
+            marketCap: i.marketCap,
+            enterpriseValue: i.enterpriseValue,
+            trailingPe: i.trailingPe,
+            forwardPe: i.forwardPe,
+            pegRatio: i.pegRatio,
+            priceToBook: i.priceToBook,
+            priceToSales: i.priceToSales,
+            evToEbitda: i.evToEbitda,
+            beta: i.beta,
+          },
+          quality: {
+            grossMarginPct: i.grossMargin,
+            operatingMarginPct: i.operatingMargin,
+            profitMarginPct: i.profitMargin,
+            returnOnEquityPct: i.returnOnEquity,
+            revenueGrowthPct: i.revenueGrowth,
+            earningsGrowthPct: i.earningsGrowth,
+            totalCash: i.totalCash,
+            totalDebt: i.totalDebt,
+            debtToEquity: i.debtToEquity,
+            freeCashflow: i.freeCashflow,
+            currentRatio: i.currentRatio,
+          },
+          shortInterest: {
+            sharesShort: i.sharesShort,
+            shortRatioDays: i.shortRatio,
+            shortPercentOfFloatPct: i.shortPercentOfFloat,
+          },
+        };
+      },
+    },
+
+    {
+      name: "get_earnings_calendar",
+      description:
+        "Upcoming earnings date and dividend dates for a ticker, plus recent EPS surprise history (actual vs estimate). Use to flag 'earnings in N days' before commenting, to plan around ex-dividend dates, or to judge whether a name tends to beat or miss.",
+      parameters: {
+        type: "object",
+        properties: { ticker: { type: "string" } },
+        required: ["ticker"],
+        additionalProperties: false,
+      },
+      execute: async (input) => {
+        const ticker = String(getProp(input, "ticker") ?? "").toUpperCase();
+        if (!ticker) return { error: "Missing ticker." };
+        const i = await getTickerInsights(ticker);
+        if (!i) return { error: `No calendar data available for ${ticker}.` };
+        const iso = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : null);
+        const dayMs = 86_400_000;
+        const daysUntil = (d: Date | null) =>
+          d ? Math.round((d.getTime() - Date.now()) / dayMs) : null;
+        return {
+          ticker: i.ticker,
+          source: i.source,
+          nextEarningsDate: iso(i.nextEarningsDate),
+          daysUntilEarnings: daysUntil(i.nextEarningsDate),
+          earningsDateIsEstimate: i.isEarningsDateEstimate,
+          exDividendDate: iso(i.exDividendDate),
+          dividendPayDate: iso(i.dividendDate),
+          forwardEps: i.forwardEps,
+          recentSurprises: i.earningsSurprises.map((s) => ({
+            quarter: iso(s.quarter),
+            epsActual: s.epsActual,
+            epsEstimate: s.epsEstimate,
+            surprisePct: s.surprisePct,
+          })),
+        };
+      },
+    },
+
+    {
+      name: "get_financial_statements",
+      description:
+        "Multi-year annual financials (up to 4 years) for a ticker from Yahoo: revenue, gross profit, operating & net income, total assets/liabilities/equity, cash, total debt, operating cash flow, capex, and free cash flow. Use to ground commentary on growth, margins, leverage, and cash generation over time rather than a single quarter.",
+      parameters: {
+        type: "object",
+        properties: { ticker: { type: "string" } },
+        required: ["ticker"],
+        additionalProperties: false,
+      },
+      execute: async (input) => {
+        const ticker = String(getProp(input, "ticker") ?? "").toUpperCase();
+        if (!ticker) return { error: "Missing ticker." };
+        const fs = await getFinancialStatements(ticker);
+        if (!fs || fs.annual.length === 0) {
+          return { error: `No financial statements available for ${ticker}.` };
+        }
+        return {
+          ticker: fs.ticker,
+          source: fs.source,
+          currency: "as-reported",
+          annual: fs.annual.map((p) => ({
+            fiscalYearEnd: p.endDate ? p.endDate.toISOString().slice(0, 10) : null,
+            totalRevenue: p.totalRevenue,
+            grossProfit: p.grossProfit,
+            operatingIncome: p.operatingIncome,
+            netIncome: p.netIncome,
+            totalAssets: p.totalAssets,
+            totalLiabilities: p.totalLiabilities,
+            totalEquity: p.totalEquity,
+            cash: p.cash,
+            totalDebt: p.totalDebt,
+            operatingCashflow: p.operatingCashflow,
+            capex: p.capex,
+            freeCashflow: p.freeCashflow,
+          })),
         };
       },
     },

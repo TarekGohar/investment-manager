@@ -16,10 +16,12 @@ import { aboutFor } from "@/lib/portfolio/about";
 import { getUserPreferences } from "@/lib/preferences";
 import {
   getCandles,
+  getFinancialStatements,
   getFundamentals,
   getIntradayCandles,
   getNews,
   getQuote,
+  getTickerInsights,
 } from "@/lib/marketdata";
 import {
   formatCompactCurrency,
@@ -30,6 +32,8 @@ import {
 } from "@/lib/format";
 import { analyzeHoldingLocation } from "@/lib/canadian/location";
 import { LocationBadge } from "@/components/location-badge";
+import { StreetView } from "@/components/street-view";
+import { FinancialStatementsTable } from "@/components/financial-statements-table";
 import { FilingsTab } from "@/components/filings-tab";
 import { ThesisCard } from "@/components/thesis-card";
 import { getLatestQuarterlyAnalysis } from "@/lib/ai/filings";
@@ -94,12 +98,26 @@ export default async function PositionPage({
   ]);
 
   const thesis = await getThesis(session.user.id, ticker);
-  const [unifiedFilings, insiderTxns, latestQuarterly, cikInfo, tickerListing] = await Promise.all([
+  const [
+    unifiedFilings,
+    insiderTxns,
+    latestQuarterly,
+    cikInfo,
+    tickerListing,
+    insights,
+    financials,
+  ] = await Promise.all([
     getFilingsForTicker(ticker, { sinceDays: 365 }).catch(() => []),
     getInsiderActivity(ticker, { sinceDays: 180, limit: 20 }).catch(() => []),
     getLatestQuarterlyAnalysis(session.user.id, ticker),
     lookupCik(ticker).catch(() => null),
     prisma.tickerListing.findUnique({ where: { ticker } }).catch(() => null),
+    preferences.fetchPositionFundamentals
+      ? getTickerInsights(ticker).catch(() => null)
+      : Promise.resolve(null),
+    preferences.fetchPositionFundamentals
+      ? getFinancialStatements(ticker).catch(() => null)
+      : Promise.resolve(null),
   ]);
 
   if (!holding && transactions.length === 0 && !quote) notFound();
@@ -465,10 +483,18 @@ export default async function PositionPage({
 
   const thesisSection = <ThesisCard ticker={ticker} initial={thesis} />;
 
+  const analystSection = insights ? <StreetView insights={insights} /> : null;
+  const financialsSection =
+    financials && financials.annual.length > 0 ? (
+      <FinancialStatementsTable statements={financials} />
+    ) : null;
+
   const tabs: Tab[] = [{ key: "Overview", content: overview }];
   tabs.push({ key: "Thesis", content: thesisSection });
+  if (analystSection) tabs.push({ key: "Analyst", content: analystSection });
   if (newsSection) tabs.push({ key: "News", content: newsSection });
   if (fundamentalsSection) tabs.push({ key: "Fundamentals", content: fundamentalsSection });
+  if (financialsSection) tabs.push({ key: "Financials", content: financialsSection });
   tabs.push({ key: "Filings", content: filingsSection });
   if (taxSection) tabs.push({ key: "Tax", content: taxSection });
   if (transactionsSection) tabs.push({ key: "Transactions", content: transactionsSection });

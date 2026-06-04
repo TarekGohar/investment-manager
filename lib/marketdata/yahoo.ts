@@ -1,6 +1,16 @@
 import "server-only";
 import YahooFinance from "yahoo-finance2";
-import type { Candle, ExtendedHours, MarketState } from "./types";
+import type {
+  AnalystAction,
+  Candle,
+  EarningsSurprise,
+  ExtendedHours,
+  FinancialPeriod,
+  FinancialStatements,
+  MarketState,
+  RecommendationTrendPoint,
+  TickerInsights,
+} from "./types";
 
 const yf = new YahooFinance();
 
@@ -141,4 +151,247 @@ export async function fetchExtendedQuotes(
   }
 
   return map;
+}
+
+// ─── quoteSummary insights (analyst, valuation, calendar, financials) ──────
+//
+// Yahoo's quoteSummary returns numbers as { raw, fmt } objects and dates as
+// { raw: unixSeconds, fmt }. We fetch with validateResult:false (Yahoo's
+// payload drifts and we only read a handful of optional fields) and normalize
+// defensively — every getter degrades to null rather than throwing.
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+type Raw = any;
+
+function qsNum(v: Raw): number | null {
+  if (v == null) return null;
+  if (typeof v === "number") return Number.isFinite(v) ? v : null;
+  if (typeof v === "object" && typeof v.raw === "number") {
+    return Number.isFinite(v.raw) ? v.raw : null;
+  }
+  return null;
+}
+
+/** Like qsNum but scales a Yahoo ratio (0.425) into a percent (42.5). */
+function qsPct(v: Raw): number | null {
+  const num = qsNum(v);
+  return num == null ? null : num * 100;
+}
+
+function qsDate(v: Raw): Date | null {
+  if (v == null) return null;
+  if (v instanceof Date) return v;
+  if (typeof v === "number") return new Date(v * 1000);
+  if (typeof v === "string") {
+    const t = Date.parse(v);
+    return Number.isNaN(t) ? null : new Date(t);
+  }
+  if (typeof v === "object") {
+    if (typeof v.raw === "number") return new Date(v.raw * 1000);
+    if (typeof v.fmt === "string") {
+      const t = Date.parse(v.fmt);
+      return Number.isNaN(t) ? null : new Date(t);
+    }
+  }
+  return null;
+}
+
+function qsStr(v: Raw): string | null {
+  return typeof v === "string" && v.trim() ? v.trim() : null;
+}
+
+async function quoteSummary(symbol: string, modules: string[]): Promise<Raw | null> {
+  try {
+    const res = await yf.quoteSummary(
+      symbol.toUpperCase(),
+      { modules: modules as any },
+      { validateResult: false },
+    );
+    return res ?? null;
+  } catch (err) {
+    console.error(`[marketdata] yahoo quoteSummary failed for ${symbol}:`, err);
+    return null;
+  }
+}
+
+/** Analyst coverage, valuation, short interest and calendar — one Yahoo call. */
+export async function fetchTickerInsights(
+  symbol: string,
+): Promise<TickerInsights | null> {
+  const sym = symbol.toUpperCase();
+  const r = await quoteSummary(sym, [
+    "financialData",
+    "recommendationTrend",
+    "upgradeDowngradeHistory",
+    "defaultKeyStatistics",
+    "summaryDetail",
+    "calendarEvents",
+    "earningsHistory",
+  ]);
+  if (!r) return null;
+
+  const fd: Raw = r.financialData ?? {};
+  const ks: Raw = r.defaultKeyStatistics ?? {};
+  const sd: Raw = r.summaryDetail ?? {};
+  const cal: Raw = r.calendarEvents ?? {};
+  const calEarnings: Raw = cal.earnings ?? {};
+
+  const recommendationTrend: RecommendationTrendPoint[] = Array.isArray(
+    r.recommendationTrend?.trend,
+  )
+    ? r.recommendationTrend.trend.slice(0, 4).map((t: Raw) => ({
+        period: qsStr(t.period) ?? "",
+        strongBuy: qsNum(t.strongBuy) ?? 0,
+        buy: qsNum(t.buy) ?? 0,
+        hold: qsNum(t.hold) ?? 0,
+        sell: qsNum(t.sell) ?? 0,
+        strongSell: qsNum(t.strongSell) ?? 0,
+      }))
+    : [];
+
+  const recentActions: AnalystAction[] = Array.isArray(
+    r.upgradeDowngradeHistory?.history,
+  )
+    ? r.upgradeDowngradeHistory.history.slice(0, 6).map((h: Raw) => ({
+        firm: qsStr(h.firm) ?? "—",
+        fromGrade: qsStr(h.fromGrade),
+        toGrade: qsStr(h.toGrade),
+        action: qsStr(h.action),
+        date: qsDate(h.epochGradeDate),
+      }))
+    : [];
+
+  const earningsSurprises: EarningsSurprise[] = Array.isArray(
+    r.earningsHistory?.history,
+  )
+    ? r.earningsHistory.history
+        .slice(-4)
+        .reverse()
+        .map((h: Raw) => ({
+          quarter: qsDate(h.quarter),
+          epsActual: qsNum(h.epsActual),
+          epsEstimate: qsNum(h.epsEstimate),
+          surprisePct: qsPct(h.surprisePercent),
+        }))
+    : [];
+
+  const edArr: Raw[] = Array.isArray(calEarnings.earningsDate)
+    ? calEarnings.earningsDate
+    : [];
+  const nextEarningsDate = edArr.length > 0 ? qsDate(edArr[0]) : null;
+
+  return {
+    ticker: sym,
+    source: "yahoo",
+    currentPrice: qsNum(fd.currentPrice),
+    targetMean: qsNum(fd.targetMeanPrice),
+    targetHigh: qsNum(fd.targetHighPrice),
+    targetLow: qsNum(fd.targetLowPrice),
+    numberOfAnalysts: qsNum(fd.numberOfAnalystOpinions),
+    recommendationKey: qsStr(fd.recommendationKey),
+    recommendationMean: qsNum(fd.recommendationMean),
+    recommendationTrend,
+    recentActions,
+    marketCap: qsNum(sd.marketCap),
+    enterpriseValue: qsNum(ks.enterpriseValue),
+    trailingPe: qsNum(sd.trailingPE),
+    forwardPe: qsNum(sd.forwardPE) ?? qsNum(ks.forwardPE),
+    pegRatio: qsNum(ks.pegRatio),
+    priceToBook: qsNum(ks.priceToBook),
+    priceToSales: qsNum(sd.priceToSalesTrailing12Months),
+    evToEbitda: qsNum(ks.enterpriseToEbitda),
+    grossMargin: qsPct(fd.grossMargins),
+    operatingMargin: qsPct(fd.operatingMargins),
+    profitMargin: qsPct(fd.profitMargins),
+    returnOnEquity: qsPct(fd.returnOnEquity),
+    revenueGrowth: qsPct(fd.revenueGrowth),
+    earningsGrowth: qsPct(fd.earningsGrowth),
+    totalCash: qsNum(fd.totalCash),
+    totalDebt: qsNum(fd.totalDebt),
+    debtToEquity: qsNum(fd.debtToEquity),
+    freeCashflow: qsNum(fd.freeCashflow),
+    currentRatio: qsNum(fd.currentRatio),
+    beta: qsNum(sd.beta) ?? qsNum(ks.beta),
+    forwardEps: qsNum(ks.forwardEps),
+    trailingEps: qsNum(ks.trailingEps),
+    sharesShort: qsNum(ks.sharesShort),
+    shortRatio: qsNum(ks.shortRatio),
+    shortPercentOfFloat: qsPct(ks.shortPercentOfFloat),
+    nextEarningsDate,
+    isEarningsDateEstimate: edArr.length > 1,
+    exDividendDate: qsDate(cal.exDividendDate) ?? qsDate(sd.exDividendDate),
+    dividendDate: qsDate(cal.dividendDate) ?? qsDate(sd.dividendDate),
+    earningsSurprises,
+  };
+}
+
+/** Multi-year annual financial statements (income / balance / cash flow). */
+export async function fetchFinancialStatements(
+  symbol: string,
+): Promise<FinancialStatements | null> {
+  const sym = symbol.toUpperCase();
+  const r = await quoteSummary(sym, [
+    "incomeStatementHistory",
+    "balanceSheetHistory",
+    "cashflowStatementHistory",
+  ]);
+  if (!r) return null;
+
+  const inc: Raw[] = r.incomeStatementHistory?.incomeStatementHistory ?? [];
+  const bal: Raw[] = r.balanceSheetHistory?.balanceSheetStatements ?? [];
+  const cf: Raw[] = r.cashflowStatementHistory?.cashflowStatements ?? [];
+  if (inc.length === 0 && bal.length === 0 && cf.length === 0) return null;
+
+  const yearOf = (v: Raw): number | null => {
+    const d = qsDate(v);
+    return d ? d.getUTCFullYear() : null;
+  };
+  const index = (rows: Raw[]) => {
+    const m = new Map<number, Raw>();
+    for (const row of rows) {
+      const y = yearOf(row.endDate);
+      if (y != null && !m.has(y)) m.set(y, row);
+    }
+    return m;
+  };
+  const incByYear = index(inc);
+  const balByYear = index(bal);
+  const cfByYear = index(cf);
+
+  const years = Array.from(
+    new Set([...incByYear.keys(), ...balByYear.keys(), ...cfByYear.keys()]),
+  )
+    .sort((a, b) => b - a)
+    .slice(0, 4);
+
+  const annual: FinancialPeriod[] = years.map((y) => {
+    const i: Raw = incByYear.get(y) ?? {};
+    const b: Raw = balByYear.get(y) ?? {};
+    const c: Raw = cfByYear.get(y) ?? {};
+    const operatingCashflow = qsNum(c.totalCashFromOperatingActivities);
+    const capex = qsNum(c.capitalExpenditures);
+    const longTermDebt = qsNum(b.longTermDebt);
+    const shortLongTermDebt = qsNum(b.shortLongTermDebt);
+    const totalDebt =
+      longTermDebt == null && shortLongTermDebt == null
+        ? null
+        : (longTermDebt ?? 0) + (shortLongTermDebt ?? 0);
+    return {
+      endDate: qsDate(i.endDate) ?? qsDate(b.endDate) ?? qsDate(c.endDate),
+      totalRevenue: qsNum(i.totalRevenue),
+      grossProfit: qsNum(i.grossProfit),
+      operatingIncome: qsNum(i.operatingIncome),
+      netIncome: qsNum(i.netIncome),
+      totalAssets: qsNum(b.totalAssets),
+      totalLiabilities: qsNum(b.totalLiab),
+      totalEquity: qsNum(b.totalStockholderEquity),
+      cash: qsNum(b.cash),
+      totalDebt,
+      operatingCashflow,
+      capex,
+      freeCashflow: operatingCashflow != null ? operatingCashflow + (capex ?? 0) : null,
+    };
+  });
+
+  return { ticker: sym, source: "yahoo", annual };
 }

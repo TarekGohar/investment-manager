@@ -4,8 +4,10 @@ import { fetchFundamentals, fetchNews, fetchQuote } from "./finnhub";
 import {
   fetchCandlesYahoo,
   fetchExtendedQuotes,
+  fetchFinancialStatements,
   fetchIntraday1D,
   fetchIntraday1W,
+  fetchTickerInsights,
 } from "./yahoo";
 import { fetchEarningsTranscript } from "./alphavantage";
 import { tmxGetQuote, tmxGetNews } from "./tmx";
@@ -15,9 +17,11 @@ import type {
   Candle,
   EarningsTranscript,
   ExtendedHours,
+  FinancialStatements,
   Fundamentals,
   NewsItem,
   Quote,
+  TickerInsights,
   TranscriptSegment,
 } from "./types";
 import type { Prisma } from "@/generated/prisma";
@@ -56,13 +60,19 @@ export function quoteCurrencyForTicker(ticker: string): "USD" | "CAD" {
 }
 
 export type {
+  AnalystAction,
   Candle,
+  EarningsSurprise,
   EarningsTranscript,
   ExtendedHours,
+  FinancialPeriod,
+  FinancialStatements,
   Fundamentals,
   MarketState,
   NewsItem,
   Quote,
+  RecommendationTrendPoint,
+  TickerInsights,
   TranscriptSegment,
 } from "./types";
 
@@ -72,6 +82,8 @@ const TTL = {
   fundamentals: 24 * 60 * 60 * 1000, // 24 hours
   candles: 12 * 60 * 60 * 1000, // 12 hours
   extended: 60 * 1000, // 1 minute
+  insights: 6 * 60 * 60 * 1000, // 6 hours
+  statements: 24 * 60 * 60 * 1000, // 24 hours
 };
 
 const num = (d: { toNumber(): number } | null | undefined) => (d == null ? null : d.toNumber());
@@ -645,4 +657,37 @@ export async function getEarningsTranscript(
     }
   }
   return null;
+}
+
+// ─── Analyst insights & financial statements (Yahoo quoteSummary) ──────────
+//
+// Both are sourced from Yahoo, which (unlike Finnhub's free tier) also covers
+// Canadian-listed names, so there's no US-only guard. Cached in-process with a
+// short TTL — the data is semi-static and a page render fans out many lookups.
+
+const insightsCache = new Map<string, { data: TickerInsights; at: number }>();
+const statementsCache = new Map<string, { data: FinancialStatements; at: number }>();
+
+export async function getTickerInsights(
+  ticker: string,
+): Promise<TickerInsights | null> {
+  const sym = ticker.toUpperCase();
+  if (!isTradeableTicker(sym)) return null;
+  const hit = insightsCache.get(sym);
+  if (hit && Date.now() - hit.at < TTL.insights) return hit.data;
+  const fresh = await fetchTickerInsights(sym);
+  if (fresh) insightsCache.set(sym, { data: fresh, at: Date.now() });
+  return fresh ?? hit?.data ?? null;
+}
+
+export async function getFinancialStatements(
+  ticker: string,
+): Promise<FinancialStatements | null> {
+  const sym = ticker.toUpperCase();
+  if (!isTradeableTicker(sym)) return null;
+  const hit = statementsCache.get(sym);
+  if (hit && Date.now() - hit.at < TTL.statements) return hit.data;
+  const fresh = await fetchFinancialStatements(sym);
+  if (fresh) statementsCache.set(sym, { data: fresh, at: Date.now() });
+  return fresh ?? hit?.data ?? null;
 }
