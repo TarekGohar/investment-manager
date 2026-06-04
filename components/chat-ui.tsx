@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ChatMenu } from "@/components/conversations-sidebar";
 import { SparkleIcon } from "@/components/icons";
 import { Markdown } from "@/components/markdown";
+import { AI_USAGE_REFRESH_EVENT } from "@/lib/events";
 import type { ConversationSummary } from "@/lib/ai/queries";
 
 type ToolStatus = "calling" | "done" | "error";
@@ -172,6 +173,10 @@ export function ChatUI({
 
     abortRef.current = null;
     setPending(false);
+
+    // The route persists token usage before closing the stream, so by now the
+    // DB reflects this turn — nudge the navbar counter to refetch and stay live.
+    window.dispatchEvent(new Event(AI_USAGE_REFRESH_EVENT));
   }
 
   function stop() {

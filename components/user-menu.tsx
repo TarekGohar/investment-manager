@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { authClient } from "@/lib/auth-client";
+import { AI_USAGE_REFRESH_EVENT } from "@/lib/events";
 
 type UsageBreakdownItem = {
   family: string;
@@ -36,6 +37,38 @@ export function UserMenu({
   const [expanded, setExpanded] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+
+  // Live usage counter. Seeded from the server-rendered props, then refetched
+  // whenever an AI interaction reports it spent tokens — so the navbar number
+  // stays current without refreshing the whole route.
+  const [usage, setUsage] = useState({
+    tokens: tokensThisMonth,
+    cost: costThisMonthUsd,
+    breakdown: costBreakdown,
+  });
+
+  useEffect(() => {
+    async function refresh() {
+      try {
+        const res = await fetch("/api/ai/usage", { cache: "no-store" });
+        if (!res.ok) return;
+        const data = (await res.json()) as {
+          totalTokens?: number;
+          costUsd?: number;
+          byFamily?: UsageBreakdownItem[];
+        };
+        setUsage({
+          tokens: data.totalTokens ?? 0,
+          cost: data.costUsd ?? 0,
+          breakdown: data.byFamily ?? [],
+        });
+      } catch {
+        // Non-critical — leave the last known numbers in place.
+      }
+    }
+    window.addEventListener(AI_USAGE_REFRESH_EVENT, refresh);
+    return () => window.removeEventListener(AI_USAGE_REFRESH_EVENT, refresh);
+  }, []);
 
   useEffect(() => {
     if (!open) return;
@@ -94,7 +127,7 @@ export function UserMenu({
             <div className="truncate text-sm font-semibold">{name ?? "Signed in"}</div>
             <div className="truncate text-xs text-muted">{email}</div>
           </div>
-          {typeof costThisMonthUsd === "number" ? (
+          {typeof usage.cost === "number" ? (
             <div className="mt-1 rounded-[10px] border border-border bg-bg/40 px-3 py-2.5">
               <button
                 type="button"
@@ -104,21 +137,21 @@ export function UserMenu({
               >
                 <span className="text-sm font-medium text-text">Anthropic spend</span>
                 <span className="text-sm font-semibold tabular-nums text-text">
-                  {formatUsd(costThisMonthUsd)}
+                  {formatUsd(usage.cost)}
                 </span>
               </button>
               <div className="mt-0.5 flex items-center justify-between text-[11px] text-muted">
                 <span>this month</span>
-                {typeof tokensThisMonth === "number" && tokensThisMonth > 0 ? (
+                {typeof usage.tokens === "number" && usage.tokens > 0 ? (
                   <span className="tabular-nums">
-                    {compactTokens(tokensThisMonth)} tokens
+                    {compactTokens(usage.tokens)} tokens
                   </span>
                 ) : null}
               </div>
 
-              {expanded && costBreakdown && costBreakdown.length > 0 ? (
+              {expanded && usage.breakdown && usage.breakdown.length > 0 ? (
                 <div className="mt-2 space-y-1.5 border-t border-border pt-2">
-                  {costBreakdown.map((row) => (
+                  {usage.breakdown.map((row) => (
                     <div
                       key={row.family}
                       className="flex items-center justify-between gap-2 text-[12px]"
