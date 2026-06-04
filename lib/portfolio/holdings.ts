@@ -78,10 +78,31 @@ export function deriveHoldings(transactions: Tx[]): Holding[] {
     let totalDividends = 0;
     let totalForeignTax = 0;
     let firstOpenAt: Date | null = null;
-    // The position's "accounting currency" — captured from the first
-    // share-affecting tx (BUY or TRANSFER_IN). Drives whether we need to
-    // FX-convert the live market quote.
-    let positionCurrency: string | null = null;
+
+    // Decide the position's accounting currency before iterating. If every
+    // share-affecting tx is in the same currency, display in that currency
+    // and skip FX entirely. Otherwise the position is mixed (e.g. AVGO with
+    // historical CAD TRANSFER_INs and a recent USD BUY) — fall back to CAD
+    // and convert each non-CAD tx using its captured fxRateToCad. Without
+    // this, raw USD prices get summed into a CAD cost basis as if 1 USD = 1
+    // CAD, understating cost and inflating unrealized P&L.
+    const txCurrencies = new Set<string>();
+    for (const tx of sorted) {
+      if (tx.kind === "BUY" || tx.kind === "TRANSFER_IN") {
+        txCurrencies.add(tx.currency);
+      }
+    }
+    const positionCurrency: string =
+      txCurrencies.size > 1
+        ? "CAD"
+        : (txCurrencies.values().next().value ?? sorted[0].currency ?? "CAD");
+
+    function inDisplayCurrency(amount: number, tx: Tx): number {
+      if (tx.currency === positionCurrency) return amount;
+      if (positionCurrency === "CAD") return amount * (tx.fxRateToCad ?? 1);
+      if (tx.currency === "CAD" && tx.fxRateToCad) return amount / tx.fxRateToCad;
+      return amount;
+    }
 
     // Per-kind ledger for the byKind breakdown
     const byKind = emptyByKind();
@@ -93,11 +114,13 @@ export function deriveHoldings(transactions: Tx[]): Holding[] {
       switch (tx.kind) {
         case "BUY": {
           if (!firstOpenAt) firstOpenAt = tx.occurredAt;
-          if (!positionCurrency) positionCurrency = tx.currency;
           // If this BUY absorbs a disallowed superficial loss from an earlier
           // SELL, add that amount to its cost basis (CRA-mandated adjustment).
           const absorbedLoss = lossAtBuy.get(tx.id) ?? 0;
-          const grossCost = tx.quantity * tx.price + tx.fees + absorbedLoss;
+          const grossCost = inDisplayCurrency(
+            tx.quantity * tx.price + tx.fees + absorbedLoss,
+            tx,
+          );
           slice.quantity += tx.quantity;
           slice.costBasis += grossCost;
           if (isNonReg) {
@@ -108,7 +131,7 @@ export function deriveHoldings(transactions: Tx[]): Holding[] {
         }
 
         case "SELL": {
-          const proceeds = tx.quantity * tx.price - tx.fees;
+          const proceeds = inDisplayCurrency(tx.quantity * tx.price - tx.fees, tx);
           const isSuperficial = superficialSaleIds.has(tx.id);
           const absorbedByRemaining = (lossAtSale.get(tx.id) ?? 0) > 0;
           if (isNonReg && nonRegQty > 1e-9) {
@@ -160,19 +183,21 @@ export function deriveHoldings(transactions: Tx[]): Holding[] {
           // pool cost basis (per-share ACB falls; share count unchanged) and
           // do NOT add it to totalDividends. Any FWT still rolls up for
           // recoverability tracking.
+          const distribution = inDisplayCurrency(tx.price, tx);
+          const fwt = inDisplayCurrency(tx.foreignTaxWithheld, tx);
           if (tx.dividendType === "RETURN_OF_CAPITAL") {
             if (isNonReg) {
-              nonRegCostBasis = Math.max(0, nonRegCostBasis - tx.price);
+              nonRegCostBasis = Math.max(0, nonRegCostBasis - distribution);
             }
             if (slice.quantity > 1e-9) {
-              slice.costBasis = Math.max(0, slice.costBasis - tx.price);
+              slice.costBasis = Math.max(0, slice.costBasis - distribution);
             }
-            totalForeignTax += tx.foreignTaxWithheld;
+            totalForeignTax += fwt;
             break;
           }
           // For DIVIDEND, `price` holds the total amount received (gross of FWT).
-          totalDividends += tx.price;
-          totalForeignTax += tx.foreignTaxWithheld;
+          totalDividends += distribution;
+          totalForeignTax += fwt;
           break;
         }
 
@@ -193,8 +218,7 @@ export function deriveHoldings(transactions: Tx[]): Holding[] {
 
         case "TRANSFER_IN": {
           if (!firstOpenAt) firstOpenAt = tx.occurredAt;
-          if (!positionCurrency) positionCurrency = tx.currency;
-          const grossCost = tx.quantity * tx.price;
+          const grossCost = inDisplayCurrency(tx.quantity * tx.price, tx);
           slice.quantity += tx.quantity;
           slice.costBasis += grossCost;
           if (isNonReg) {
@@ -277,7 +301,7 @@ export function deriveHoldings(transactions: Tx[]): Holding[] {
 
     holdings.push({
       ticker,
-      currency: positionCurrency ?? sorted[0].currency ?? "CAD",
+      currency: positionCurrency,
       quantity: totalQty,
       costBasis: nonRegCostBasis + regCost,
       nonRegQuantity: nonRegQty,
