@@ -86,6 +86,29 @@ export async function getTransactionHistory(
   return listTransactions(userId, { ticker });
 }
 
+/**
+ * Bring a quote (always in the security's home-exchange currency) into the
+ * position's native currency. CAT quote in USD but position recorded in CAD →
+ * multiply by USD→CAD. NFLX quote in USD, position recorded in USD → 1.
+ *
+ * Pass `usdToCadRate` from `getFxRateToCad("USD", today)`; null falls back to
+ * 1, which is wrong but matches the rest of the app's degraded behavior when
+ * FX is unavailable.
+ */
+export function quoteToPositionFactor(
+  holdingCurrency: string,
+  ticker: string,
+  usdToCadRate: number | null,
+): number {
+  const qc = quoteCurrencyForTicker(ticker);
+  if (qc === holdingCurrency) return 1;
+  if (qc === "USD" && holdingCurrency === "CAD") return usdToCadRate ?? 1;
+  if (qc === "CAD" && holdingCurrency === "USD") {
+    return usdToCadRate ? 1 / usdToCadRate : 1;
+  }
+  return 1;
+}
+
 export async function getEnrichedPortfolio(userId: string): Promise<EnrichedPortfolio> {
   const summary = await getPortfolio(userId);
   if (summary.holdings.length === 0) {
@@ -134,22 +157,6 @@ export async function getEnrichedPortfolio(userId: string): Promise<EnrichedPort
     return amount;
   }
 
-  /**
-   * Bring the quote (always in security's home-exchange currency) into the
-   * position's native currency for per-row display. CAT quote in USD but
-   * position recorded in CAD → multiply by USD→CAD. NFLX quote in USD,
-   * position recorded in USD → factor of 1.
-   */
-  function quoteToPositionFactor(holdingCurrency: string, ticker: string): number {
-    const qc = quoteCurrencyForTicker(ticker);
-    if (qc === holdingCurrency) return 1;
-    if (qc === "USD" && holdingCurrency === "CAD") return usdToCadRate ?? 1;
-    if (qc === "CAD" && holdingCurrency === "USD") {
-      return usdToCadRate ? 1 / usdToCadRate : 1;
-    }
-    return 1;
-  }
-
   let totalMarketValueCad = 0;
   let totalCostCad = 0;
   let totalRealizedCad = 0;
@@ -166,7 +173,7 @@ export async function getEnrichedPortfolio(userId: string): Promise<EnrichedPort
       hasAnyQuote = true;
       if (!latestAsOf || q.asOf > latestAsOf) latestAsOf = q.asOf;
     }
-    const factor = quoteToPositionFactor(h.currency, h.ticker);
+    const factor = quoteToPositionFactor(h.currency, h.ticker, usdToCadRate);
     // Native-currency display values (what the per-row UI uses)
     const marketPrice = q ? q.price * factor : null;
     const marketValue = marketPrice != null ? marketPrice * h.quantity : null;

@@ -11,7 +11,9 @@ import {
   getHolding,
   getTransactionHistory,
   isWatched,
+  quoteToPositionFactor,
 } from "@/lib/portfolio/queries";
+import { getFxRateToCad } from "@/lib/marketdata/fx";
 import { aboutFor } from "@/lib/portfolio/about";
 import { getUserPreferences } from "@/lib/preferences";
 import {
@@ -22,6 +24,7 @@ import {
   getNews,
   getQuote,
   getTickerInsights,
+  quoteCurrencyForTicker,
 } from "@/lib/marketdata";
 import {
   formatCompactCurrency,
@@ -125,7 +128,15 @@ export default async function PositionPage({
   const about = aboutFor(ticker);
   const companyName = fundamentals?.companyName ?? ticker;
 
-  const marketValue = quote && holding ? quote.price * holding.quantity : null;
+  // Convert the quote into the position's recorded currency so that subtracting
+  // costBasis (also in position currency) yields a meaningful number. Without
+  // this, a CAD-recorded AVGO position would mix USD market value with CAD
+  // cost basis and disagree with the portfolio page's calculation.
+  const needsFx = holding ? holding.currency !== quoteCurrencyForTicker(ticker) : false;
+  const usdToCadRate = needsFx ? ((await getFxRateToCad("USD", new Date()))?.rate ?? null) : null;
+  const quoteFactor = holding ? quoteToPositionFactor(holding.currency, ticker, usdToCadRate) : 1;
+  const marketPrice = quote ? quote.price * quoteFactor : null;
+  const marketValue = marketPrice != null && holding ? marketPrice * holding.quantity : null;
   const unrealized = marketValue != null && holding ? marketValue - holding.costBasis : null;
   const unrealizedPct =
     unrealized != null && holding && holding.costBasis > 0
@@ -287,14 +298,14 @@ export default async function PositionPage({
     ? analyzeHoldingLocation({
         ticker,
         byKind: holding.byKind,
-        marketPrice: quote?.price ?? null,
+        marketPrice,
         fundamentals,
       })
     : null;
 
   const taxableUnrealized =
-    holding && quote && holding.nonRegQuantity > 0
-      ? (quote.price - holding.acb) * holding.nonRegQuantity
+    holding && marketPrice != null && holding.nonRegQuantity > 0
+      ? (marketPrice - holding.acb) * holding.nonRegQuantity
       : null;
   const taxableUnrealizedAfterInclusion =
     taxableUnrealized != null ? taxableUnrealized * 0.5 : null;
@@ -402,7 +413,7 @@ export default async function PositionPage({
             {locationAnalysis.perKind.map((slice) => {
               const sliceData = holding.byKind[slice.currentKind];
               const sliceQty = sliceData?.quantity ?? 0;
-              const sliceMV = quote ? quote.price * sliceQty : null;
+              const sliceMV = marketPrice != null ? marketPrice * sliceQty : null;
               return (
                 <div
                   key={slice.currentKind}
