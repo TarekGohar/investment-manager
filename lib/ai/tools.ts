@@ -38,14 +38,22 @@ import {
 import { prisma } from "@/lib/prisma";
 import { listTransactions } from "@/lib/portfolio/queries";
 import { getUserPreferences } from "@/lib/preferences";
+import { createDecisionEvent } from "@/lib/alerts/hub";
+import { getDecisionHistoryForTicker } from "@/lib/alerts/retrospective";
+import { getConvictionTrajectory, recordConvictionRating } from "@/lib/policy/thesis";
 import type { ToolDefinition } from "./types";
 
 /**
- * Returns the toolset bound to a given user. Tools that need user context
- * (portfolio, positions, transactions) close over `userId`. Pure data tools
- * (quote, news, fundamentals) ignore it.
+ * Returns the toolset bound to a given user (and optionally the current
+ * conversation). Tools that need user context close over `userId`. The
+ * Decision Hub write tool (`propose_decision`) additionally closes over
+ * `conversationId` so the event can be linked back to the originating chat.
+ * Pure data tools (quote, news, fundamentals) ignore both.
  */
-export function buildTools(userId: string): ToolDefinition[] {
+export function buildTools(
+  userId: string,
+  conversationId?: string,
+): ToolDefinition[] {
   return [
     {
       name: "get_quote",
@@ -328,7 +336,7 @@ export function buildTools(userId: string): ToolDefinition[] {
     {
       name: "get_investment_policy",
       description:
-        "The user's Investment Policy Statement: target allocations, geographic targets, drift threshold, behavioral thresholds, ticker categorization, and free-form notes. Plus the current actual vs target drift table. Empty objects / nulls mean the user has not configured that piece — never substitute a default. Use this to answer questions like 'am I drifting from my targets' or 'what's my IPS say about X'.",
+        "The user's Investment Policy Statement: target allocations, geographic targets, drift threshold, HARD CONCENTRATION CAPS (`maxSingleNameWeightPct`, `maxThemeWeightPct`, `capReasoning`), behavioral thresholds, ticker categorization, and free-form notes. Plus the current actual vs target drift table. Empty objects / nulls mean the user has not configured that piece — never substitute a default. The caps are first-class decision inputs: if either is null, refuse to recommend size changes on that dimension and tell the user to set it in Settings → IPS. Use this to answer questions like 'am I drifting from my targets', 'should I add to X', or 'is this position too large'.",
       parameters: { type: "object", properties: {}, additionalProperties: false },
       execute: async () => {
         const [ips, portfolio] = await Promise.all([
@@ -953,6 +961,277 @@ export function buildTools(userId: string): ToolDefinition[] {
             })),
           })),
         };
+      },
+    },
+
+    {
+      name: "get_thesis_conviction",
+      description:
+        "Current conviction rating (1-10) on the user's thesis for a ticker, plus when it was last rated and the trajectory (most recent 6 ratings). Use this BEFORE discussing a held position so you know whether the user's current view is fresh or stale. If the rating is null or older than ~90 days, the user is overdue for a re-rate — prompt them before continuing analysis. If the trajectory shows decay (e.g. 9→7→5) without a corresponding TRIM / EXIT decision, that's the 'holding on past conviction' pattern — flag it.",
+      parameters: {
+        type: "object",
+        properties: {
+          ticker: { type: "string" },
+        },
+        required: ["ticker"],
+        additionalProperties: false,
+      },
+      execute: async (args) => {
+        const ticker = (getProp(args, "ticker") as string).toUpperCase();
+        const thesis = await prisma.thesis.findUnique({
+          where: { userId_ticker: { userId, ticker } },
+          select: { id: true, convictionRating: true, convictionRatedAt: true, convictionNotes: true, status: true },
+        });
+        if (!thesis) {
+          return { ok: false, error: `No thesis exists for ${ticker} — can't read conviction.` };
+        }
+        const trajectory = await getConvictionTrajectory(thesis.id, 6);
+        const ratedAt = thesis.convictionRatedAt;
+        const daysSince = ratedAt
+          ? Math.floor((Date.now() - ratedAt.getTime()) / 86_400_000)
+          : null;
+        return {
+          ticker,
+          status: thesis.status,
+          currentRating: thesis.convictionRating,
+          ratedAt: ratedAt?.toISOString().slice(0, 10) ?? null,
+          daysSinceRated: daysSince,
+          isStale: daysSince == null || daysSince > 90,
+          currentNotes: thesis.convictionNotes,
+          trajectory: trajectory.map((r) => ({
+            rating: r.rating,
+            ratedAt: r.ratedAt.toISOString().slice(0, 10),
+            source: r.source,
+            notes: r.notes,
+          })),
+        };
+      },
+    },
+
+    {
+      name: "record_conviction_rating",
+      description:
+        "Persist a fresh conviction rating (1-10) on a ticker's thesis. Use this when the user gives you a new rating in conversation. Notes are required for any change of 2+ points from the prior rating. Source is AI_CHAT (set automatically). After writing, mention the trajectory in your reply so the user sees the move in context.",
+      parameters: {
+        type: "object",
+        properties: {
+          ticker: { type: "string" },
+          rating: {
+            type: "integer",
+            minimum: 1,
+            maximum: 10,
+            description: "1 = 'I'd exit if I were starting fresh today'; 10 = highest-conviction name in the book.",
+          },
+          notes: {
+            type: ["string", "null"],
+            description: "Why this rating? Required for changes of 2+ points from the prior rating.",
+          },
+        },
+        required: ["ticker", "rating"],
+        additionalProperties: false,
+      },
+      execute: async (args) => {
+        const ticker = (getProp(args, "ticker") as string).toUpperCase();
+        const rating = getProp(args, "rating") as number;
+        const notes = (getProp(args, "notes") as string | null | undefined) ?? null;
+        const result = await recordConvictionRating({
+          userId,
+          ticker,
+          rating,
+          notes,
+          source: "AI_CHAT",
+        });
+        if (!result.ok) return result;
+        return {
+          ok: true,
+          ticker,
+          rating,
+          trajectory: result.trajectory.map((r) => ({
+            rating: r.rating,
+            ratedAt: r.ratedAt.toISOString().slice(0, 10),
+            source: r.source,
+          })),
+        };
+      },
+    },
+
+    {
+      name: "get_decision_history",
+      description:
+        "Past decisions raised on a ticker (or across the whole portfolio) with outcomes. Use this BEFORE proposing a new decision on a ticker — it lets you ground your recommendation in the user's track record on this name. If you've recommended ADD on AVGO three times and the user has ABANDONED all three, the right move on the fourth recommendation isn't to recommend again with the same reasoning. Returns chronological entries with action, source, outcome, your past rationale, and the user's outcome notes when present.",
+      parameters: {
+        type: "object",
+        properties: {
+          ticker: {
+            type: ["string", "null"],
+            description: "Filter to a specific ticker (e.g. 'AVGO'). Null returns all recent decisions.",
+          },
+          sinceMonths: {
+            type: ["number", "null"],
+            description: "Lookback window in months. Defaults to 24.",
+          },
+          limit: {
+            type: ["number", "null"],
+            description: "Max rows. Defaults to 20.",
+          },
+        },
+        additionalProperties: false,
+      },
+      execute: async (args) => {
+        const tickerArg = getProp(args, "ticker") as string | null | undefined;
+        const sinceMonths = (getProp(args, "sinceMonths") as number | null | undefined) ?? 24;
+        const limit = (getProp(args, "limit") as number | null | undefined) ?? 20;
+        const rows = await getDecisionHistoryForTicker({
+          userId,
+          ticker: tickerArg ?? undefined,
+          sinceMonths,
+          limit,
+        });
+        return {
+          count: rows.length,
+          rows: rows.map((r) => ({
+            firedAt: r.firedAt.toISOString().slice(0, 10),
+            ticker: r.ticker,
+            action: r.action,
+            source: r.source,
+            outcome: r.outcome,
+            rationale: r.rationale,
+            outcomeNotes: r.outcomeNotes,
+          })),
+        };
+      },
+    },
+
+    {
+      name: "propose_decision",
+      description:
+        "Write a decision into the user's Decision Hub inbox. Use this when your recommendation is concrete enough to merit tracking: a specific action on a specific ticker (or portfolio-level), with a rationale, a sizing frame, an invalidation trigger, and ideally a review event. Do NOT call this for general discussion, exploratory questions, or hold-and-do-nothing answers. The user closes the loop manually in the Hub by recording what they actually did. Calling this tool is how the Hub gets cross-chat memory of your recommendations.",
+      parameters: {
+        type: "object",
+        properties: {
+          ticker: {
+            type: ["string", "null"],
+            description: "Ticker the decision is about, e.g. 'AVGO'. Null for portfolio-level decisions (rebalances, cash deployment, etc.).",
+          },
+          recommendedAction: {
+            type: "string",
+            enum: [
+              "ADD",
+              "TRIM",
+              "EXIT",
+              "HOLD_THROUGH_DRAWDOWN",
+              "DEPLOY_ELSEWHERE",
+              "HARVEST_LOSS",
+              "REBALANCE",
+            ],
+            description: "What you're recommending the user do. Must be a concrete action — chat-proposed decisions always carry one. If your conclusion is 'the user should think about this' but there's no specific trade, don't call propose_decision; just say it in your reply.",
+          },
+          urgency: {
+            type: "string",
+            enum: ["INFO", "MATERIAL", "URGENT"],
+            description: "MATERIAL by default. URGENT only when there's a real time-decay (earnings within 48h, ex-div on Monday, TLH window closing, etc.). INFO for low-priority watch items.",
+          },
+          message: {
+            type: "string",
+            description: "One-line summary shown on the inbox card. Plain English, e.g. 'Trim 2 AVGO to bring back inside 12% cap.'",
+          },
+          rationale: {
+            type: "string",
+            description: "1-3 sentences in PM voice. WHY this name, now. Should be the thesis-grounded reason — not generic.",
+          },
+          actionDetails: {
+            type: "object",
+            description: "Structured spec of the trade: ticker, quantity, priceContext, account when relevant.",
+            properties: {
+              ticker: { type: "string" },
+              quantity: { type: "number" },
+              priceContext: { type: "string", description: "e.g. '$408-412' or 'at market'." },
+              account: { type: "string", description: "e.g. 'TFSA', 'NON_REGISTERED', 'RRSP'." },
+            },
+            additionalProperties: true,
+          },
+          sizingRationale: {
+            type: "string",
+            description: "1-2 sentences on WHY this size. NAV terms, not share-count terms. Required for ADD / TRIM / EXIT.",
+          },
+          sizingDetails: {
+            type: "object",
+            description: "Structured sizing math: nominalUsd, pctOfNav, maxLossToInvalidationUsd, maxLossToInvalidationPctOfNav, postTradePositionPctOfNav, postTradeBucketPctOfTarget. Use the fields that apply.",
+            additionalProperties: true,
+          },
+          supportingEvidence: {
+            type: "object",
+            description: "Frozen snapshot of the numbers you cited: quote, position size, IPS drift, correlation values, transcript excerpt, etc. Will be displayed as-is on the detail page.",
+            additionalProperties: true,
+          },
+          alternativesConsidered: {
+            type: "string",
+            description: "1-2 sentences naming what you chose this over. Required for any ADD — capital-allocation discipline.",
+          },
+          invalidationTrigger: {
+            type: "string",
+            description: "What would make THIS decision wrong (separate from thesis invalidation). e.g. 'Q4 sequential revenue growth < 5% on Sept 2 print.'",
+          },
+          reviewEvent: {
+            type: "string",
+            description: "Human-readable trigger that should bring this decision back up for review, e.g. 'Sept 2 earnings'.",
+          },
+          reviewByDate: {
+            type: "string",
+            description: "ISO date (YYYY-MM-DD) by which the decision should be reviewed.",
+          },
+        },
+        required: ["recommendedAction", "message", "rationale"],
+        additionalProperties: false,
+      },
+      execute: async (args) => {
+        if (!conversationId) {
+          return { ok: false, error: "propose_decision can only be called inside a chat — no conversationId in context." };
+        }
+        const ticker = (getProp(args, "ticker") as string | null | undefined) ?? null;
+        const action = getProp(args, "recommendedAction") as string;
+        const urgency = (getProp(args, "urgency") as string | undefined) ?? "MATERIAL";
+        const message = getProp(args, "message") as string;
+        const rationale = getProp(args, "rationale") as string;
+        const sizingRationale = getProp(args, "sizingRationale") as string | undefined;
+        const alternativesConsidered = getProp(args, "alternativesConsidered") as string | undefined;
+        const invalidationTrigger = getProp(args, "invalidationTrigger") as string | undefined;
+        const reviewEvent = getProp(args, "reviewEvent") as string | undefined;
+        const reviewByDateStr = getProp(args, "reviewByDate") as string | undefined;
+        const reviewByDate = reviewByDateStr ? new Date(reviewByDateStr) : null;
+        const actionDetails = getProp(args, "actionDetails") as Record<string, unknown> | null | undefined;
+        const sizingDetails = getProp(args, "sizingDetails") as Record<string, unknown> | null | undefined;
+        const supportingEvidence = getProp(args, "supportingEvidence") as Record<string, unknown> | null | undefined;
+
+        try {
+          const event = await createDecisionEvent({
+            userId,
+            source: "AI_CHAT",
+            conversationId,
+            ticker,
+            message,
+            recommendedAction: action as Parameters<typeof createDecisionEvent>[0]["recommendedAction"],
+            urgency: urgency as Parameters<typeof createDecisionEvent>[0]["urgency"],
+            rationale,
+            actionDetails: actionDetails ?? null,
+            sizingRationale: sizingRationale ?? null,
+            sizingDetails: sizingDetails ?? null,
+            supportingEvidence: supportingEvidence ?? null,
+            alternativesConsidered: alternativesConsidered ?? null,
+            invalidationTrigger: invalidationTrigger ?? null,
+            reviewEvent: reviewEvent ?? null,
+            reviewByDate: reviewByDate && !isNaN(reviewByDate.getTime()) ? reviewByDate : null,
+          });
+          return {
+            ok: true,
+            decisionId: event.id,
+            url: `/alerts/${event.id}`,
+            message: "Decision recorded. Tell the user it's in their Decisions inbox.",
+          };
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : "Failed to record decision.";
+          return { ok: false, error: msg };
+        }
       },
     },
   ];

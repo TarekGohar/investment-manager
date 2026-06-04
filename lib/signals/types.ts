@@ -66,6 +66,9 @@ export const RULE_LABEL: Record<AlertRule, string> = {
   TLH_OPPORTUNITY: "Tax-loss harvest opportunity",
   REBALANCE_DUE: "Rebalance due",
   THESIS_INVALIDATION_CANDIDATE: "Thesis invalidation candidate",
+  AI_PROPOSED_DECISION: "AI-proposed decision",
+  REVIEW_PROPOSED_DECISION: "Review-proposed decision",
+  MANUAL_FLAG: "Manually flagged",
 };
 
 export const RULE_DESCRIPTION: Record<AlertRule, string> = {
@@ -81,6 +84,11 @@ export const RULE_DESCRIPTION: Record<AlertRule, string> = {
   REBALANCE_DUE: "An IPS category has drifted past your threshold for ≥3 days",
   THESIS_INVALIDATION_CANDIDATE:
     "A new filing summary may meet your stated invalidation criteria",
+  AI_PROPOSED_DECISION:
+    "Synthetic parent for decisions raised by the AI chat (not user-configurable)",
+  REVIEW_PROPOSED_DECISION:
+    "Synthetic parent for decisions raised by daily / weekly / annual reviews",
+  MANUAL_FLAG: "Synthetic parent for decisions raised manually from a page",
 };
 
 export const SCOPE_LABEL: Record<AlertScope, string> = {

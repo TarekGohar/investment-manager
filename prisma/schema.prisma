@@ -459,6 +459,61 @@ enum AlertRule {
   /// A new filing's summary suggests the user's stated invalidation criteria
   /// for an active thesis may be met. Wired in Session 5.
   THESIS_INVALIDATION_CANDIDATE
+  /// Synthetic parent for decision events raised by the AI chat persona via
+  /// `propose_decision`. No cron check; the rule just anchors the event to an
+  /// Alert row so the FK stays valid.
+  AI_PROPOSED_DECISION
+  /// Synthetic parent for decision events raised by daily / weekly / annual
+  /// reviews when they conclude something needs action.
+  REVIEW_PROPOSED_DECISION
+  /// Synthetic parent for decision events raised manually from a position /
+  /// thesis page.
+  MANUAL_FLAG
+}
+
+/// Which medium produced this decision event. The Hub UI shows the source so
+/// the user can trace back to the originating chat / review.
+enum AlertSource {
+  CRON_RULE
+  AI_CHAT
+  DAILY_REVIEW
+  WEEKLY_REVIEW
+  ANNUAL_REVIEW
+  MANUAL
+}
+
+/// The action a decision-grade event recommends. NONE is used for
+/// notification-only events that don't graduate to a decision.
+enum RecommendedAction {
+  ADD
+  TRIM
+  EXIT
+  HOLD_THROUGH_DRAWDOWN
+  DEPLOY_ELSEWHERE
+  HARVEST_LOSS
+  REBALANCE
+  REVIEW_THESIS
+  NONE
+}
+
+/// Workflow state of a decision. OPEN appears in the Hub inbox; everything
+/// else is history. All four executed/abandoned/rejected outcomes are
+/// first-class — abandoning a recommendation is data, not failure.
+enum DecisionOutcome {
+  OPEN
+  EXECUTED_AS_RECOMMENDED
+  EXECUTED_REVISED
+  ABANDONED
+  REJECTED
+  EXPIRED
+}
+
+/// Drives Hub inbox grouping + email digest filtering. INFO is silent by
+/// default; MATERIAL / URGENT trigger digest emails.
+enum DecisionUrgency {
+  INFO
+  MATERIAL
+  URGENT
 }
 
 enum NewsSeverity {
@@ -507,12 +562,63 @@ model AlertEvent {
   data    Json
   read    Boolean  @default(false)
 
-  alert Alert @relation(fields: [alertId], references: [id], onDelete: Cascade)
-  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// Which medium produced this event. CRON_RULE for legacy + ongoing
+  /// rule-driven events; AI_CHAT, DAILY_REVIEW, WEEKLY_REVIEW, ANNUAL_REVIEW,
+  /// MANUAL for the new Decision Hub sources.
+  source AlertSource @default(CRON_RULE)
+  /// What the platform suggests the user do. Null means this is a pure
+  /// notification, not a decision; the Hub inbox filters those out.
+  recommendedAction RecommendedAction?
+  /// Structured spec of the recommendation: { ticker, quantity?, priceContext?, account? }.
+  actionDetails Json?
+  /// 1-3 sentence WHY in PM voice. Why this name, now.
+  rationale String?
+  /// 1-2 sentence WHY *this size* — separate from why this name. Forces
+  /// thinking in NAV terms, not share-count terms.
+  sizingRationale String?
+  /// Structured: { nominalUsd, pctOfNav, maxLossToInvalidationUsd,
+  /// maxLossToInvalidationPctOfNav, postTradePositionPctOfNav,
+  /// postTradeBucketPctOfTarget }. Lets the retrospective compute
+  /// "did sizing match the documented framework?"
+  sizingDetails Json?
+  /// Snapshot of inputs at firing time (numbers, tool outputs, links).
+  /// Frozen so it doesn't go stale as positions move.
+  supportingEvidence Json?
+  /// What was chosen over what — PM capital-allocation discipline.
+  alternativesConsidered String?
+  /// What would make THIS decision wrong (separate from thesis-level
+  /// invalidation, which lives on the Thesis model).
+  invalidationTrigger String?
+  /// Soft deadline / natural review date.
+  reviewByDate DateTime?
+  /// Human-readable review trigger, e.g. "Sept 2 print, criterion (a) clock".
+  reviewEvent String?
+  urgency DecisionUrgency @default(INFO)
+  /// FK to AIConversation when source=AI_CHAT. SetNull on conversation delete
+  /// so the decision history outlives the chat.
+  conversationId String?
+  /// Free string ref to the originating review (AIAnalysis id, etc.).
+  /// Not a hard FK because reviews live across multiple models.
+  reviewId String?
+  /// Workflow state. Hub inbox shows OPEN; retrospective shows everything else.
+  outcome DecisionOutcome @default(OPEN)
+  /// What the user actually executed (may differ from `actionDetails.quantity`).
+  outcomeExecutedQuantity Decimal? @db.Decimal(20, 6)
+  outcomeExecutedPrice    Decimal? @db.Decimal(18, 4)
+  /// User's free-text "why I did what I did" or "why I walked away".
+  outcomeNotes      String?
+  outcomeRecordedAt DateTime?
+
+  alert        Alert           @relation(fields: [alertId], references: [id], onDelete: Cascade)
+  user         User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversation AIConversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
 
   @@index([userId, firedAt(sort: Desc)])
   @@index([userId, read])
   @@index([alertId, ticker, firedAt(sort: Desc)])
+  /// Primary Hub inbox query: open decisions for a user, grouped by urgency,
+  /// newest first.
+  @@index([userId, outcome, urgency, firedAt(sort: Desc)])
   @@map("alert_event")
 }
 
@@ -590,8 +696,9 @@ model AIConversation {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  user     User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  messages AIMessage[]
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages       AIMessage[]
+  decisionEvents AlertEvent[]
 
   @@index([userId, updatedAt])
   @@map("ai_conversation")
@@ -748,6 +855,18 @@ model InvestmentPolicy {
   targetGeography     Json     @default("{}")
   /// Drift threshold for rebalance alerts (percentage points, e.g. 5 = ±5pp).
   driftThresholdPct   Decimal? @db.Decimal(5, 2)
+  /// Hard cap on any single name as a % of total NAV. The PM persona
+  /// uses this as the real concentration discipline: bucket targets are
+  /// aspirational, this cap is non-negotiable. Winners are allowed to
+  /// grow inside the cap; trims happen at the cap, not before.
+  maxSingleNameWeightPct Decimal? @db.Decimal(5, 2)
+  /// Hard cap on any single qualitative theme (AI capex, Canadian banks,
+  /// etc.) as a % of NAV. Themes aren't structured in the DB; the persona
+  /// infers them qualitatively from theses + correlation.
+  maxThemeWeightPct      Decimal? @db.Decimal(5, 2)
+  /// Free-text reasoning behind the caps. Surfaced back by the persona
+  /// when applying a cap so the user sees their own past reasoning.
+  capReasoning           String?
   /// Behavioral pattern thresholds. Null = check disabled.
   panicSellDrawdownPct Decimal? @db.Decimal(5, 2)
   panicSellWindowDays  Int?
@@ -779,6 +898,15 @@ model Thesis {
   /// Markdown body of the most recent AI re-check ("is thesis still intact?")
   lastAiReview        String?
   lastReviewedAt      DateTime?
+  /// Current conviction rating 1-10 set by the user (or by the AI persona
+  /// after asking the user). 1 = "I'd exit if I were starting fresh today";
+  /// 10 = highest-conviction name in the book. Nullable so legacy theses
+  /// don't break; the persona prompts for an initial rating on first touch.
+  convictionRating    Int?
+  convictionRatedAt   DateTime?
+  /// Short free-text captured at re-rate time. Required for any change of
+  /// 2 or more points so the audit trail explains the move.
+  convictionNotes     String?
   /// When the filings-driven invalidation check last ran for this thesis.
   /// Distinct from lastReviewedAt (which is on-demand "re-check thesis").
   lastInvalidationCheckAt    DateTime?
@@ -791,11 +919,35 @@ model Thesis {
   createdAt           DateTime     @default(now())
   updatedAt           DateTime     @updatedAt
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user                User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  convictionHistory   ConvictionHistory[]
 
   @@unique([userId, ticker])
   @@index([userId, status])
+  @@index([convictionRatedAt])
   @@map("thesis")
+}
+
+/// Audit trail of conviction re-ratings. One row per re-rate. Lets the
+/// retrospective track conviction *trajectory* per name, not just current
+/// value. Decay from a high rating to a low rating without a corresponding
+/// EXIT / TRIM decision is the classic "I'm holding on enthusiasm I no
+/// longer have" pattern.
+model ConvictionHistory {
+  id        String      @id @default(cuid())
+  thesisId  String
+  /// 1-10 integer captured at re-rate time.
+  rating    Int
+  /// Free-text "why this rating" — required for changes of >=2 points.
+  notes     String?
+  /// Which medium produced this re-rate (UI manual, AI chat prompt, etc.).
+  source    AlertSource @default(MANUAL)
+  ratedAt   DateTime    @default(now())
+
+  thesis Thesis @relation(fields: [thesisId], references: [id], onDelete: Cascade)
+
+  @@index([thesisId, ratedAt(sort: Desc)])
+  @@map("conviction_history")
 }
 
 /// Daily portfolio NAV snapshot. Written by /api/cron/eod-snapshot. One row

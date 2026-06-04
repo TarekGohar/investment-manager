@@ -25,6 +25,16 @@ export type TlhFiredEvent = {
   ticker: string;
   message: string;
   data: Record<string, unknown>;
+  // Decision-grade fields — TLH events graduate to Hub decisions with
+  // HARVEST_LOSS action and full sizing rationale.
+  recommendedAction: "HARVEST_LOSS";
+  urgency: "MATERIAL" | "URGENT";
+  rationale: string;
+  actionDetails: Record<string, unknown>;
+  supportingEvidence: Record<string, unknown>;
+  invalidationTrigger: string;
+  reviewByDate: Date | null;
+  reviewEvent: string | null;
 };
 
 const DEFAULT_MIN_LOSS_CAD = 250;
@@ -104,6 +114,17 @@ function formatTlhEvent(userId: string, c: TlhCandidate): TlhFiredEvent {
     `Your ${c.ticker} shares are worth ${Math.abs(lossPct).toFixed(0)}% less than your average buying price (called your ACB). ` +
     `That's a ${formatCurrency(lossSize)} unrealized loss. Selling those shares would turn that paper loss into a real one you could use to lower your tax bill — this is called "tax-loss harvesting". ` +
     `${savingNote} ${replacementNote}`;
+  // Urgency: URGENT if tax-year is within 30 days; MATERIAL otherwise.
+  const now = new Date();
+  const yearEnd = new Date(Date.UTC(now.getUTCFullYear(), 11, 31));
+  const daysToYearEnd = Math.ceil((yearEnd.getTime() - now.getTime()) / 86_400_000);
+  const urgency: "MATERIAL" | "URGENT" = daysToYearEnd <= 30 ? "URGENT" : "MATERIAL";
+
+  const rationale =
+    c.estimatedTaxSaving != null
+      ? `Crystallizable loss of ${formatCurrency(lossSize)} in a non-registered account. Estimated tax saving ${formatCurrency(c.estimatedTaxSaving)} at your marginal cap-gains rate. No active superficial-loss window on this ticker.`
+      : `Crystallizable loss of ${formatCurrency(lossSize)} in a non-registered account. Tax saving depends on marginal rate (set in Tax profile). No active superficial-loss window on this ticker.`;
+
   return {
     userId,
     ticker: c.ticker,
@@ -122,5 +143,26 @@ function formatTlhEvent(userId: string, c: TlhCandidate): TlhFiredEvent {
       hasActiveWindow: c.hasActiveWindow,
       earliestBuybackDate: c.earliestBuybackDate,
     },
+    recommendedAction: "HARVEST_LOSS",
+    urgency,
+    rationale,
+    actionDetails: {
+      ticker: c.ticker,
+      quantity: c.nonRegQuantity,
+      account: "NON_REGISTERED",
+      replacementTicker: replacement?.ticker ?? null,
+      replacementLabel: replacement?.label ?? null,
+    },
+    supportingEvidence: {
+      unrealizedLossCad: lossSize,
+      lossPct,
+      acb: c.acb,
+      currentPrice: c.currentPrice,
+      nonRegQuantity: c.nonRegQuantity,
+      estimatedTaxSavingCad: c.estimatedTaxSaving,
+    },
+    invalidationTrigger: `${c.ticker} (or an identical security) is bought within 30 days of the sale by you or an affiliated person — triggering CRA's superficial-loss rule and disallowing the loss (added to the replacement's ACB instead).`,
+    reviewByDate: yearEnd,
+    reviewEvent: "Tax year-end",
   };
 }

@@ -4,7 +4,7 @@ import { getModel, getProvider } from "@/lib/ai";
 import { getQuote, getNews } from "@/lib/marketdata";
 import { getHolding } from "@/lib/portfolio/queries";
 import { getLatestQuarterlyAnalysis } from "@/lib/ai/filings";
-import type { ThesisStatus } from "@/generated/prisma";
+import type { AlertSource, ThesisStatus } from "@/generated/prisma";
 
 export type ThesisRecord = {
   id: string;
@@ -20,8 +20,19 @@ export type ThesisRecord = {
   lastInvalidationCheckAt: Date | null;
   lastInvalidationConfidence: number | null;
   lastInvalidationReasoning: string | null;
+  /** Current conviction rating 1-10. Null = never rated. */
+  convictionRating: number | null;
+  convictionRatedAt: Date | null;
+  convictionNotes: string | null;
   createdAt: Date;
   updatedAt: Date;
+};
+
+export type ConvictionHistoryRecord = {
+  rating: number;
+  notes: string | null;
+  source: AlertSource;
+  ratedAt: Date;
 };
 
 export type ThesisInput = {
@@ -226,6 +237,9 @@ function toRecord(row: {
   lastInvalidationCheckAt: Date | null;
   lastInvalidationConfidence: number | null;
   lastInvalidationReasoning: string | null;
+  convictionRating: number | null;
+  convictionRatedAt: Date | null;
+  convictionNotes: string | null;
   createdAt: Date;
   updatedAt: Date;
 }): ThesisRecord {
@@ -242,7 +256,91 @@ function toRecord(row: {
     lastInvalidationCheckAt: row.lastInvalidationCheckAt,
     lastInvalidationConfidence: row.lastInvalidationConfidence,
     lastInvalidationReasoning: row.lastInvalidationReasoning,
+    convictionRating: row.convictionRating,
+    convictionRatedAt: row.convictionRatedAt,
+    convictionNotes: row.convictionNotes,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
+}
+
+/**
+ * Write a conviction re-rating. Updates the current value on Thesis and
+ * appends to ConvictionHistory for trajectory analysis. Requires notes on
+ * any change of >= 2 points so the audit trail isn't silent on big moves.
+ *
+ * Returns the new trajectory (most recent 6 ratings) so callers can show
+ * the move in context.
+ */
+export async function recordConvictionRating(args: {
+  userId: string;
+  ticker: string;
+  rating: number;
+  notes?: string | null;
+  source?: AlertSource;
+}): Promise<
+  | { ok: true; trajectory: ConvictionHistoryRecord[] }
+  | { ok: false; error: string }
+> {
+  const sym = args.ticker.toUpperCase();
+  if (!Number.isInteger(args.rating) || args.rating < 1 || args.rating > 10) {
+    return { ok: false, error: "Conviction rating must be an integer 1-10." };
+  }
+  const thesis = await prisma.thesis.findUnique({
+    where: { userId_ticker: { userId: args.userId, ticker: sym } },
+    select: { id: true, convictionRating: true },
+  });
+  if (!thesis) return { ok: false, error: `No thesis exists for ${sym}.` };
+
+  const prior = thesis.convictionRating;
+  const noteText = args.notes?.trim() ?? "";
+  if (prior != null && Math.abs(args.rating - prior) >= 2 && noteText.length === 0) {
+    return {
+      ok: false,
+      error: `Conviction is moving from ${prior} to ${args.rating} — that's a 2-point swing. Add a note explaining why.`,
+    };
+  }
+
+  const now = new Date();
+  const source: AlertSource = args.source ?? "MANUAL";
+
+  await prisma.$transaction([
+    prisma.thesis.update({
+      where: { id: thesis.id },
+      data: {
+        convictionRating: args.rating,
+        convictionRatedAt: now,
+        convictionNotes: noteText || null,
+      },
+    }),
+    prisma.convictionHistory.create({
+      data: {
+        thesisId: thesis.id,
+        rating: args.rating,
+        notes: noteText || null,
+        source,
+        ratedAt: now,
+      },
+    }),
+  ]);
+
+  const trajectory = await getConvictionTrajectory(thesis.id, 6);
+  return { ok: true, trajectory };
+}
+
+export async function getConvictionTrajectory(
+  thesisId: string,
+  limit = 6,
+): Promise<ConvictionHistoryRecord[]> {
+  const rows = await prisma.convictionHistory.findMany({
+    where: { thesisId },
+    orderBy: { ratedAt: "desc" },
+    take: limit,
+  });
+  return rows.map((r) => ({
+    rating: r.rating,
+    notes: r.notes,
+    source: r.source,
+    ratedAt: r.ratedAt,
+  }));
 }

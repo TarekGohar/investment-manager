@@ -11,25 +11,9 @@ import type { EnrichedPortfolio } from "@/lib/portfolio/types";
 import { getEnrichedPortfolio } from "@/lib/portfolio/queries";
 import { formatCurrency, formatPercent, formatSignedCurrency } from "@/lib/format";
 
+import { buildReviewProposeTool } from "@/lib/ai/review-tools";
+
 const MATERIAL_MOVE_PCT = 3;
-
-const DAILY_PERSONA = `${HOUSE_STYLE}
-
-You are a portfolio manager writing the end-of-day note for a single retail investor.
-
-Output gate — read carefully:
-- If the only material change since the last review is intra-day price noise (no single position moved ±${MATERIAL_MOVE_PCT}% or more, no new filing, no thesis-invalidation fire, no IPS drift breach, no material news) — output the literal token "${NO_REVIEW_SENTINEL}" and STOP. Don't write anything else.
-- Otherwise: produce the EOD note as below.
-
-Keep it tight — 220 words or fewer. Markdown.
-
-Structure:
-1. **Lead** — net portfolio move in $ and %, what carried it
-2. **Positions** — name the 2-3 biggest contributors / detractors with dollar moves
-3. **Risk note** — concentration, unusual day moves, anything to flag
-4. **Watch** — one specific thing for tomorrow. If there's genuinely nothing notable to watch, write "Nothing on the calendar — quiet day expected." instead of inventing filler.
-
-If a YESTERDAY'S DAILY REVIEW block appears in context, your "Watch" item must explicitly grade yesterday's "Watch" item (resolved / still open / superseded).`;
 
 const WEEKLY_PERSONA = `${HOUSE_STYLE}
 
@@ -55,7 +39,10 @@ For positions that moved ±${MATERIAL_MOVE_PCT}%+ on the week or whose thesis is
 Concentration (any single name > 20% weight), drawdowns vs cost, unusual correlations.
 
 ### Worth watching
-2-3 specific things for next week — earnings, macro events, key technical levels. These will be graded by next week's review, so be measurable.`;
+2-3 specific things for next week — earnings, macro events, key technical levels. These will be graded by next week's review, so be measurable.
+
+### Decisions to raise
+You have a \`propose_decision\` tool. Call it ONLY when your review identifies a specific actionable item — a concrete trim, add, harvest, or rebalance leg with rationale and sizing. Do NOT call it for "worth watching" items or general commentary. Each actionable item is one tool call. If nothing in this review needs a tracked decision, don't call it at all — your prose suffices.`;
 
 function formatPortfolioSnapshot(p: EnrichedPortfolio): string {
   const lines: string[] = [];
@@ -98,11 +85,12 @@ function formatPortfolioSnapshot(p: EnrichedPortfolio): string {
 
 async function generateAnalysis(args: {
   userId: string;
-  kind: "EOD_DAILY" | "WEEKLY";
+  kind: "WEEKLY";
   system: string;
   task: string;
   portfolio: EnrichedPortfolio;
   priorAnalysisLabel: string;
+  tools?: import("@/lib/ai/types").ToolDefinition[];
 }): Promise<
   | {
       body: string;
@@ -148,8 +136,8 @@ async function generateAnalysis(args: {
     model,
     system: args.system,
     messages: [{ role: "user", text: userMessage }],
-    tools: [],
-    maxToolRounds: 1,
+    tools: args.tools ?? [],
+    maxToolRounds: args.tools?.length ? 4 : 1,
   })) {
     if (ev.type === "text") body += ev.delta;
     if (ev.type === "done" && ev.usage) usage = ev.usage;
@@ -172,50 +160,35 @@ async function generateAnalysis(args: {
   };
 }
 
-export async function generateDailyReview(userId: string): Promise<string | null> {
-  const portfolio = await getEnrichedPortfolio(userId);
-  if (portfolio.holdings.length === 0) return null;
-
-  const result = await generateAnalysis({
-    userId,
-    kind: "EOD_DAILY",
-    system: DAILY_PERSONA,
-    task: "Write the end-of-day portfolio note (or output the skip sentinel if nothing material).",
-    portfolio,
-    priorAnalysisLabel: "Yesterday's daily review",
-  });
-  if (!result || result.skipped) return null;
-
-  const now = new Date();
-  const created = await prisma.aIAnalysis.create({
-    data: {
-      userId,
-      kind: "EOD_DAILY",
-      title: `Daily review · ${now.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`,
-      body: result.body,
-      metrics: {
-        totalMarketValue: portfolio.totalMarketValue,
-        totalCost: portfolio.totalCost,
-        totalDayChange: portfolio.totalDayChange,
-        totalDayChangePct: portfolio.totalDayChangePct,
-        totalUnrealized: portfolio.totalUnrealized,
-        hasAnyQuote: portfolio.hasAnyQuote,
-        holdingsCount: portfolio.holdings.length,
-      },
-      model: getModel("review"),
-      inputTokens: result.tokens?.input,
-      cachedTokens: result.tokens?.cached,
-      cacheCreationTokens: result.tokens?.cacheCreation,
-      outputTokens: result.tokens?.output,
-    },
-    select: { id: true },
-  });
-  return created.id;
-}
-
 export async function generateWeeklyReview(userId: string): Promise<string | null> {
   const portfolio = await getEnrichedPortfolio(userId);
   if (portfolio.holdings.length === 0) return null;
+
+  // Pre-create the AIAnalysis row with a placeholder body so the
+  // propose_decision tool can reference its ID. We overwrite the body once
+  // the model is done streaming.
+  const now = new Date();
+  const placeholder = await prisma.aIAnalysis.create({
+    data: {
+      userId,
+      kind: "WEEKLY",
+      title: `Weekly review · week of ${now.toLocaleDateString("en-US", { month: "short", day: "numeric" })}`,
+      body: "(generating)",
+      metrics: {
+        totalMarketValue: portfolio.totalMarketValue,
+        totalCost: portfolio.totalCost,
+        holdingsCount: portfolio.holdings.length,
+      },
+      model: getModel("review"),
+    },
+    select: { id: true },
+  });
+
+  const proposeTool = buildReviewProposeTool({
+    userId,
+    source: "WEEKLY_REVIEW",
+    reviewId: placeholder.id,
+  });
 
   const result = await generateAnalysis({
     userId,
@@ -224,35 +197,31 @@ export async function generateWeeklyReview(userId: string): Promise<string | nul
     task: "Write the weekly portfolio review (or output the skip sentinel if nothing material).",
     portfolio,
     priorAnalysisLabel: "Last week's review",
+    tools: [proposeTool],
   });
-  if (!result || result.skipped) return null;
 
-  const now = new Date();
-  const created = await prisma.aIAnalysis.create({
+  // If skipped or empty, delete the placeholder so the inbox isn't littered.
+  if (!result || result.skipped) {
+    await prisma.aIAnalysis.delete({ where: { id: placeholder.id } }).catch(() => {});
+    return null;
+  }
+
+  await prisma.aIAnalysis.update({
+    where: { id: placeholder.id },
     data: {
-      userId,
-      kind: "WEEKLY",
-      title: `Weekly review · week of ${now.toLocaleDateString("en-US", { month: "short", day: "numeric" })}`,
       body: result.body,
-      metrics: {
-        totalMarketValue: portfolio.totalMarketValue,
-        totalCost: portfolio.totalCost,
-        holdingsCount: portfolio.holdings.length,
-      },
-      model: getModel("review"),
       inputTokens: result.tokens?.input,
       cachedTokens: result.tokens?.cached,
       cacheCreationTokens: result.tokens?.cacheCreation,
       outputTokens: result.tokens?.output,
     },
-    select: { id: true },
   });
-  return created.id;
+  return placeholder.id;
 }
 
 export async function getLatestAnalysis(
   userId: string,
-  kind: "EOD_DAILY" | "WEEKLY",
+  kind: "WEEKLY",
 ): Promise<{
   id: string;
   title: string | null;

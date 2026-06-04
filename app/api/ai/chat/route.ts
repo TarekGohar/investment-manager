@@ -46,7 +46,7 @@ export async function POST(req: Request) {
   const history = toChatHistory(stored);
   const messages: ChatMessage[] = [...history];
 
-  const tools = buildTools(session.user.id);
+  const tools = buildTools(session.user.id, conversation.id);
   const provider = getProvider();
   const model = getModel("chat");
 
@@ -98,6 +98,25 @@ export async function POST(req: Request) {
             case "tool_result":
               send("tool_result", { id: ev.id, name: ev.name, isError: ev.isError });
               toolMeta.set(ev.id, { name: ev.name, result: ev.result });
+              // Surface successful propose_decision calls as a separate
+              // event so the chat UI can render an inbox pill.
+              if (ev.name === "propose_decision" && !ev.isError) {
+                try {
+                  const parsed = JSON.parse(ev.result) as {
+                    ok?: boolean;
+                    decisionId?: string;
+                    url?: string;
+                  };
+                  if (parsed?.ok && parsed.decisionId) {
+                    send("decision_raised", {
+                      decisionId: parsed.decisionId,
+                      url: parsed.url ?? `/alerts/${parsed.decisionId}`,
+                    });
+                  }
+                } catch {
+                  // Non-JSON result — skip silently.
+                }
+              }
               break;
             case "done":
               finalText = ev.finalText;

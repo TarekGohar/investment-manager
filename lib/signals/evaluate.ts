@@ -4,11 +4,13 @@ import { getEnrichedPortfolio } from "@/lib/portfolio/queries";
 import { getCandles, getQuotes } from "@/lib/marketdata";
 import { sendAlertDigest } from "@/lib/email";
 import { getUserPreferences } from "@/lib/preferences";
+import { createDecisionEvent } from "@/lib/alerts/hub";
 import { COOLDOWN_MS_BY_RULE, EVALUATORS } from "./rules";
 import { runTlhWatch } from "@/lib/coaching/tlh-watch";
 import { runRebalanceWatch } from "@/lib/coaching/rebalance-watch";
+import { runConvictionDecayWatch } from "@/lib/coaching/conviction-decay";
 import type { AlertConfig, FiredEvent } from "./types";
-import type { Alert, AlertRule, AlertScope, Candle, Prisma } from "@/generated/prisma";
+import type { Alert, AlertRule, AlertScope, Candle } from "@/generated/prisma";
 import type { Candle as MarketCandle } from "@/lib/marketdata";
 
 type EvaluateResult = {
@@ -89,15 +91,16 @@ export async function evaluateUserAlerts(userId: string): Promise<EvaluateResult
     // Per-rule cooldown dedup, plus NEWS_MATERIAL handles its own newsId dedup internally
     fresh = await dedupeAgainstRecent(candidateEvents, enabled);
     if (fresh.length > 0) {
-      await prisma.alertEvent.createMany({
-        data: fresh.map((e) => ({
-          alertId: e.alertId,
+      for (const e of fresh) {
+        await createDecisionEvent({
           userId: e.userId,
+          source: "CRON_RULE",
+          alertId: e.alertId,
           ticker: e.ticker,
           message: e.message,
-          data: e.data as Prisma.InputJsonValue,
-        })),
-      });
+          data: e.data,
+        });
+      }
     }
   }
 
@@ -185,32 +188,54 @@ async function runCoachingPass(userId: string): Promise<FiredEvent[]> {
     }),
   ]);
 
+  // Conviction-decay check writes Hub events directly (not via FiredEvent /
+  // digest pipeline) — it's INFO/MATERIAL urgency on the Hub side, doesn't
+  // need to flow into the legacy email path.
+  await runConvictionDecayWatch(userId).catch((err) => {
+    console.error(`[coaching/conviction-decay] ${userId}:`, err);
+    return { fired: 0 };
+  });
+
   const out: FiredEvent[] = [];
   if (tlhEvents.length > 0) {
     const alert = await ensureSystemAlert(userId, "TLH_OPPORTUNITY");
-    const data = tlhEvents.map((e) => ({
-      alertId: alert.id,
-      userId,
-      ticker: e.ticker,
-      message: e.message,
-      data: e.data as Prisma.InputJsonValue,
-    }));
-    await prisma.alertEvent.createMany({ data });
     for (const e of tlhEvents) {
+      await createDecisionEvent({
+        userId,
+        source: "CRON_RULE",
+        alertId: alert.id,
+        ticker: e.ticker,
+        message: e.message,
+        data: e.data,
+        recommendedAction: e.recommendedAction,
+        urgency: e.urgency,
+        rationale: e.rationale,
+        actionDetails: e.actionDetails,
+        supportingEvidence: e.supportingEvidence,
+        invalidationTrigger: e.invalidationTrigger,
+        reviewByDate: e.reviewByDate,
+        reviewEvent: e.reviewEvent,
+      });
       out.push({ alertId: alert.id, userId, ticker: e.ticker, message: e.message, data: e.data });
     }
   }
   if (rebalanceEvents.length > 0) {
     const alert = await ensureSystemAlert(userId, "REBALANCE_DUE");
-    const data = rebalanceEvents.map((e) => ({
-      alertId: alert.id,
-      userId,
-      ticker: e.ticker,
-      message: e.message,
-      data: e.data as Prisma.InputJsonValue,
-    }));
-    await prisma.alertEvent.createMany({ data });
     for (const e of rebalanceEvents) {
+      await createDecisionEvent({
+        userId,
+        source: "CRON_RULE",
+        alertId: alert.id,
+        ticker: e.ticker,
+        message: e.message,
+        data: e.data,
+        recommendedAction: e.recommendedAction,
+        urgency: e.urgency,
+        rationale: e.rationale,
+        actionDetails: e.actionDetails,
+        supportingEvidence: e.supportingEvidence,
+        invalidationTrigger: e.invalidationTrigger,
+      });
       out.push({ alertId: alert.id, userId, ticker: e.ticker, message: e.message, data: e.data });
     }
   }

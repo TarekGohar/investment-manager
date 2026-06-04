@@ -43,11 +43,17 @@ export function ThesisList({ theses }: { theses: ThesisRecord[] }) {
                 >
                   {t.ticker}
                 </Link>
-                <span
-                  className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${STATUS_TONE[t.status]}`}
-                >
-                  {STATUS_LABEL[t.status]}
-                </span>
+                <div className="flex items-center gap-2">
+                  <ConvictionPill
+                    rating={t.convictionRating}
+                    ratedAt={t.convictionRatedAt}
+                  />
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${STATUS_TONE[t.status]}`}
+                  >
+                    {STATUS_LABEL[t.status]}
+                  </span>
+                </div>
               </div>
               <p className="mt-2 text-[13px] leading-relaxed text-soft">{t.body}</p>
               {t.invalidationCriteria ? (
@@ -79,5 +85,37 @@ export function ThesisList({ theses }: { theses: ThesisRecord[] }) {
         </div>
       )}
     </section>
+  );
+}
+
+function ConvictionPill({
+  rating,
+  ratedAt,
+}: {
+  rating: number | null;
+  ratedAt: Date | null;
+}) {
+  const isStale =
+    ratedAt == null || Date.now() - ratedAt.getTime() > 90 * 86_400_000;
+  if (rating == null) {
+    return (
+      <span className="rounded-full bg-bg/40 px-2 py-0.5 text-[10px] font-semibold text-muted">
+        Unrated
+      </span>
+    );
+  }
+  const tone =
+    rating >= 7
+      ? "bg-success/15 text-success"
+      : rating >= 4
+        ? "bg-warning/15 text-warning"
+        : "bg-danger/15 text-danger";
+  return (
+    <span
+      className={`rounded-full px-2 py-0.5 text-[10px] font-semibold tabular-nums ${tone} ${isStale ? "opacity-60" : ""}`}
+      title={isStale ? "Conviction is stale (>90d since rated)" : undefined}
+    >
+      Conv {rating}/10{isStale ? " ·stale" : ""}
+    </span>
   );
 }

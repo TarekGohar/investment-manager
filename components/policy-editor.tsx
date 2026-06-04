@@ -28,6 +28,9 @@ export function PolicyEditor({
     toRows(initial.targetGeography),
   );
   const [driftThreshold, setDriftThreshold] = useState(numText(initial.driftThresholdPct));
+  const [maxSingleName, setMaxSingleName] = useState(numText(initial.maxSingleNameWeightPct));
+  const [maxTheme, setMaxTheme] = useState(numText(initial.maxThemeWeightPct));
+  const [capReasoning, setCapReasoning] = useState(initial.capReasoning ?? "");
   const [panicSellDd, setPanicSellDd] = useState(numText(initial.panicSellDrawdownPct));
   const [panicSellWindow, setPanicSellWindow] = useState(numText(initial.panicSellWindowDays));
   const [fomoRunup, setFomoRunup] = useState(numText(initial.fomoBuyRunupPct));
@@ -43,6 +46,9 @@ export function PolicyEditor({
       targetAllocation: fromRows(allocation),
       targetGeography: fromRows(geography),
       driftThresholdPct: parseNum(driftThreshold),
+      maxSingleNameWeightPct: parseNum(maxSingleName),
+      maxThemeWeightPct: parseNum(maxTheme),
+      capReasoning: capReasoning.trim() || null,
       panicSellDrawdownPct: parseNum(panicSellDd),
       panicSellWindowDays: parseInt0(panicSellWindow),
       fomoBuyRunupPct: parseNum(fomoRunup),
@@ -102,6 +108,29 @@ export function PolicyEditor({
           help={<>If actual vs target diverges by more than this (percentage points), <Term term="Drift">drift</Term> is flagged. Blank disables the check.</>}
         >
           <UnitInput value={driftThreshold} onChange={setDriftThreshold} unit="pp" />
+        </Block>
+
+        <Block
+          title="Hard concentration caps"
+          help="The real discipline. Bucket targets above are aspirational; these caps are non-negotiable. The PM persona will refuse to recommend size changes if either cap is null. Quality compounders are allowed to grow into oversized positions inside the cap — trims happen at the cap, not before."
+        >
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-1">
+              <span className="text-xs text-muted">Per name:</span>
+              <UnitInput value={maxSingleName} onChange={setMaxSingleName} unit="% NAV" />
+            </div>
+            <div className="flex items-center gap-1">
+              <span className="text-xs text-muted">Per theme:</span>
+              <UnitInput value={maxTheme} onChange={setMaxTheme} unit="% NAV" />
+            </div>
+          </div>
+          <textarea
+            value={capReasoning}
+            onChange={(e) => setCapReasoning(e.target.value)}
+            rows={2}
+            placeholder="Why these numbers? e.g. '12% per name because I sleep fine in a quality compounder up to here; 30% per theme is my ulcer line.'"
+            className="mt-2 w-full rounded-[8px] border border-border bg-panel px-2.5 py-2 text-sm"
+          />
         </Block>
 
         <Block

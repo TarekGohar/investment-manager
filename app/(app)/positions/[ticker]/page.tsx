@@ -39,8 +39,9 @@ import { StreetView } from "@/components/street-view";
 import { FinancialStatementsTable } from "@/components/financial-statements-table";
 import { FilingsTab } from "@/components/filings-tab";
 import { ThesisCard } from "@/components/thesis-card";
+import { RaiseDecisionButton } from "@/components/raise-decision-button";
 import { getLatestQuarterlyAnalysis } from "@/lib/ai/filings";
-import { getThesis } from "@/lib/policy/thesis";
+import { getThesis, getConvictionTrajectory } from "@/lib/policy/thesis";
 import { lookupCik } from "@/lib/filings/edgar";
 import { getFilingsForTicker, getInsiderActivity } from "@/lib/filings";
 import { isNonRegisteredKind } from "@/lib/portfolio/holdings";
@@ -101,6 +102,9 @@ export default async function PositionPage({
   ]);
 
   const thesis = await getThesis(session.user.id, ticker);
+  const convictionTrajectory = thesis
+    ? await getConvictionTrajectory(thesis.id, 6)
+    : [];
   const [
     unifiedFilings,
     insiderTxns,
@@ -492,7 +496,13 @@ export default async function PositionPage({
     />
   );
 
-  const thesisSection = <ThesisCard ticker={ticker} initial={thesis} />;
+  const thesisSection = (
+    <ThesisCard
+      ticker={ticker}
+      initial={thesis}
+      initialConvictionTrajectory={convictionTrajectory}
+    />
+  );
 
   const analystSection = insights ? <StreetView insights={insights} /> : null;
   const financialsSection =
@@ -529,7 +539,8 @@ export default async function PositionPage({
         </section>
 
         <aside className="w-full lg:w-[400px] lg:shrink-0">
-          <div className="lg:sticky lg:top-[96px]">
+          <div className="lg:sticky lg:top-[96px] space-y-3">
+            <RaiseDecisionButton ticker={ticker} />
             <TransactionForm defaultTicker={ticker} brokerages={brokerages} />
           </div>
         </aside>

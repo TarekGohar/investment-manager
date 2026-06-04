@@ -2,7 +2,7 @@
 
 import { useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { generateDailyReviewAction } from "@/app/actions/reviews";
+import { generateWeeklyReviewAction } from "@/app/actions/reviews";
 import { useToast } from "@/components/toast-provider";
 import { Markdown } from "@/components/markdown";
 
@@ -33,7 +33,7 @@ export function PMReadCard({
   function regenerate() {
     if (pending) return;
     startTransition(async () => {
-      const result = await generateDailyReviewAction();
+      const result = await generateWeeklyReviewAction();
       if (!result.ok) {
         toast({ title: "Couldn't generate review", description: result.error, variant: "error" });
         return;
@@ -73,7 +73,7 @@ export function PMReadCard({
           disabled={pending}
           className="rounded-[20px] bg-gradient-to-r from-brand to-brand-3 px-5 py-2.5 text-[13px] font-semibold text-white transition-[filter] hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
         >
-          {pending ? "Generating…" : "Generate today’s review"}
+          {pending ? "Generating…" : "Generate weekly review"}
         </button>
       </section>
     );

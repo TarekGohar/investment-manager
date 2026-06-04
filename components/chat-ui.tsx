@@ -15,6 +15,8 @@ type ToolUse = {
   status: ToolStatus;
 };
 
+type DecisionPill = { id: string; url: string };
+
 type DisplayMessage =
   | { role: "user"; id: string; text: string }
   | {
@@ -28,6 +30,8 @@ type DisplayMessage =
        *  (length cap, content filter, abort). Helps the user tell a
        *  truncated/garbled response from a real bug. */
       warning?: string;
+      /** Decision Hub entries raised by `propose_decision` during this turn. */
+      decisions?: DecisionPill[];
     };
 
 const PORTFOLIO_SUGGESTIONS = [
@@ -149,6 +153,14 @@ export function ChatUI({
                       ? { ...t, status: data.isError ? "error" : "done" }
                       : t,
                   ),
+                };
+              case "decision_raised":
+                return {
+                  ...m,
+                  decisions: [
+                    ...(m.decisions ?? []),
+                    { id: String(data.decisionId), url: String(data.url) },
+                  ],
                 };
               case "done":
                 return { ...m, streaming: false };
@@ -340,6 +352,19 @@ function MessageRow({ message }: { message: DisplayMessage }) {
           {message.streaming ? (
             <span className="ml-0.5 inline-block h-[16px] w-[2px] translate-y-[3px] animate-pulse bg-text" />
           ) : null}
+        </div>
+      ) : null}
+      {message.decisions && message.decisions.length > 0 ? (
+        <div className="flex flex-wrap gap-2">
+          {message.decisions.map((d) => (
+            <a
+              key={d.id}
+              href={d.url}
+              className="inline-flex items-center gap-1.5 rounded-full border border-brand-2/40 bg-brand-2/10 px-3 py-1 text-xs font-semibold text-brand-2 transition-colors hover:bg-brand-2/20"
+            >
+              📌 Decision raised → view
+            </a>
+          ))}
         </div>
       ) : null}
       {message.warning ? (

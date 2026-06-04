@@ -10,6 +10,9 @@ export type InvestmentPolicyData = {
   targetAllocation: AllocationMap;
   targetGeography: AllocationMap;
   driftThresholdPct: number | null;
+  maxSingleNameWeightPct: number | null;
+  maxThemeWeightPct: number | null;
+  capReasoning: string | null;
   panicSellDrawdownPct: number | null;
   panicSellWindowDays: number | null;
   fomoBuyRunupPct: number | null;
@@ -23,6 +26,9 @@ export const EMPTY_IPS: InvestmentPolicyData = {
   targetAllocation: {},
   targetGeography: {},
   driftThresholdPct: null,
+  maxSingleNameWeightPct: null,
+  maxThemeWeightPct: null,
+  capReasoning: null,
   panicSellDrawdownPct: null,
   panicSellWindowDays: null,
   fomoBuyRunupPct: null,
@@ -41,6 +47,11 @@ export async function getInvestmentPolicy(
     targetAllocation: (row.targetAllocation as AllocationMap) ?? {},
     targetGeography: (row.targetGeography as AllocationMap) ?? {},
     driftThresholdPct: row.driftThresholdPct ? row.driftThresholdPct.toNumber() : null,
+    maxSingleNameWeightPct: row.maxSingleNameWeightPct
+      ? row.maxSingleNameWeightPct.toNumber()
+      : null,
+    maxThemeWeightPct: row.maxThemeWeightPct ? row.maxThemeWeightPct.toNumber() : null,
+    capReasoning: row.capReasoning,
     panicSellDrawdownPct: row.panicSellDrawdownPct
       ? row.panicSellDrawdownPct.toNumber()
       : null,
@@ -63,6 +74,9 @@ export async function upsertInvestmentPolicy(
       targetAllocation: data.targetAllocation as unknown as Prisma.InputJsonValue,
       targetGeography: data.targetGeography as unknown as Prisma.InputJsonValue,
       driftThresholdPct: data.driftThresholdPct,
+      maxSingleNameWeightPct: data.maxSingleNameWeightPct,
+      maxThemeWeightPct: data.maxThemeWeightPct,
+      capReasoning: data.capReasoning,
       panicSellDrawdownPct: data.panicSellDrawdownPct,
       panicSellWindowDays: data.panicSellWindowDays,
       fomoBuyRunupPct: data.fomoBuyRunupPct,
@@ -76,6 +90,9 @@ export async function upsertInvestmentPolicy(
       targetAllocation: data.targetAllocation as unknown as Prisma.InputJsonValue,
       targetGeography: data.targetGeography as unknown as Prisma.InputJsonValue,
       driftThresholdPct: data.driftThresholdPct,
+      maxSingleNameWeightPct: data.maxSingleNameWeightPct,
+      maxThemeWeightPct: data.maxThemeWeightPct,
+      capReasoning: data.capReasoning,
       panicSellDrawdownPct: data.panicSellDrawdownPct,
       panicSellWindowDays: data.panicSellWindowDays,
       fomoBuyRunupPct: data.fomoBuyRunupPct,

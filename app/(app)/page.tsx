@@ -45,7 +45,7 @@ export default async function DashboardPage() {
 
   const [portfolio, latestReview, preferences, openRecs, cashBalances] = await Promise.all([
     getEnrichedPortfolio(session.user.id),
-    getLatestAnalysis(session.user.id, "EOD_DAILY"),
+    getLatestAnalysis(session.user.id, "WEEKLY"),
     getUserPreferences(session.user.id),
     listOpenRecommendations(session.user.id),
     getCashBalances(session.user.id),

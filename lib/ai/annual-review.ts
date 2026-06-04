@@ -2,6 +2,7 @@ import "server-only";
 import { prisma } from "@/lib/prisma";
 import { getProvider, getModel } from "@/lib/ai";
 import { HOUSE_STYLE, currentContext } from "@/lib/ai/context";
+import { buildReviewProposeTool } from "@/lib/ai/review-tools";
 import { getEnrichedPortfolio, listTransactions } from "@/lib/portfolio/queries";
 import { getInvestmentPolicy, computeDrift } from "@/lib/policy/ips";
 import { listTheses } from "@/lib/policy/thesis";
@@ -43,7 +44,9 @@ If a PRIOR ANNUAL REVIEW block appears in context, grade its "Plan for next year
 
 Rules:
 - Never invent a number. If a data section is empty, say "no data" rather than guess.
-- No buy/sell recommendations beyond what the user's own IPS / thesis explicitly implies.`;
+- No buy/sell recommendations beyond what the user's own IPS / thesis explicitly implies.
+
+You have a \`propose_decision\` tool. Call it for each *specific actionable item* the review identifies — concrete trims, harvests, rebalance legs, year-end tax moves with a deadline. One call per item. Do NOT call it for "next year's commitments" (those are IPS-level intentions, not trade decisions) or for general commentary. If the review identifies no concrete actions, don't call it at all.`;
 
 export async function generateAnnualReview(args: {
   userId: string;
@@ -112,30 +115,14 @@ export async function generateAnnualReview(args: {
 
   const provider = getProvider();
   const model = getModel("deep");
-  let body = "";
-  let usage:
-    | { inputTokens: number; outputTokens: number; cachedTokens?: number; cacheCreationTokens?: number }
-    | undefined;
 
-  for await (const ev of provider.streamChat({
-    model,
-    system: ANNUAL_PERSONA,
-    messages: [{ role: "user", text: `${context}\n\n${snapshot}` }],
-    tools: [],
-    maxToolRounds: 1,
-  })) {
-    if (ev.type === "text") body += ev.delta;
-    if (ev.type === "done" && ev.usage) usage = ev.usage;
-    if (ev.type === "error") return null;
-  }
-  if (!body.trim()) return null;
-
-  const row = await prisma.aIAnalysis.create({
+  // Pre-create placeholder row so propose_decision can reference its ID.
+  const placeholder = await prisma.aIAnalysis.create({
     data: {
       userId,
       kind: "ANNUAL_REVIEW",
       title: `${year} annual review`,
-      body: body.trim(),
+      body: "(generating)",
       metrics: {
         year,
         totalMarketValueCad: portfolio.totalMarketValue,
@@ -149,14 +136,51 @@ export async function generateAnnualReview(args: {
         hasPriorReview: Boolean(priorReview),
       },
       model,
+    },
+    select: { id: true },
+  });
+
+  const proposeTool = buildReviewProposeTool({
+    userId,
+    source: "ANNUAL_REVIEW",
+    reviewId: placeholder.id,
+  });
+
+  let body = "";
+  let usage:
+    | { inputTokens: number; outputTokens: number; cachedTokens?: number; cacheCreationTokens?: number }
+    | undefined;
+
+  for await (const ev of provider.streamChat({
+    model,
+    system: ANNUAL_PERSONA,
+    messages: [{ role: "user", text: `${context}\n\n${snapshot}` }],
+    tools: [proposeTool],
+    maxToolRounds: 6,
+  })) {
+    if (ev.type === "text") body += ev.delta;
+    if (ev.type === "done" && ev.usage) usage = ev.usage;
+    if (ev.type === "error") {
+      await prisma.aIAnalysis.delete({ where: { id: placeholder.id } }).catch(() => {});
+      return null;
+    }
+  }
+  if (!body.trim()) {
+    await prisma.aIAnalysis.delete({ where: { id: placeholder.id } }).catch(() => {});
+    return null;
+  }
+
+  await prisma.aIAnalysis.update({
+    where: { id: placeholder.id },
+    data: {
+      body: body.trim(),
       inputTokens: usage?.inputTokens,
       cachedTokens: usage?.cachedTokens,
       cacheCreationTokens: usage?.cacheCreationTokens,
       outputTokens: usage?.outputTokens,
     },
-    select: { id: true },
   });
-  return row.id;
+  return placeholder.id;
 }
 
 function buildSnapshotText(args: {

@@ -8,8 +8,9 @@ import {
 } from "@/app/actions/policy";
 import { useToast } from "@/components/toast-provider";
 import { Markdown } from "@/components/markdown";
+import { ConvictionReRate } from "@/components/conviction-rerate";
 import { formatCurrency } from "@/lib/format";
-import type { ThesisRecord } from "@/lib/policy/thesis";
+import type { ConvictionHistoryRecord, ThesisRecord } from "@/lib/policy/thesis";
 
 const STATUS_OPTIONS: ThesisRecord["status"][] = [
   "ACTIVE",
@@ -21,9 +22,11 @@ const STATUS_OPTIONS: ThesisRecord["status"][] = [
 export function ThesisCard({
   ticker,
   initial,
+  initialConvictionTrajectory,
 }: {
   ticker: string;
   initial: ThesisRecord | null;
+  initialConvictionTrajectory?: ConvictionHistoryRecord[];
 }) {
   const toast = useToast();
   const [editing, setEditing] = useState(!initial);
@@ -73,6 +76,9 @@ export function ThesisCard({
           lastInvalidationCheckAt: thesis?.lastInvalidationCheckAt ?? null,
           lastInvalidationConfidence: thesis?.lastInvalidationConfidence ?? null,
           lastInvalidationReasoning: thesis?.lastInvalidationReasoning ?? null,
+          convictionRating: thesis?.convictionRating ?? null,
+          convictionRatedAt: thesis?.convictionRatedAt ?? null,
+          convictionNotes: thesis?.convictionNotes ?? null,
           createdAt: thesis?.createdAt ?? new Date(),
           updatedAt: new Date(),
         });
@@ -268,6 +274,14 @@ export function ThesisCard({
           {reviewing ? "Re-checking…" : "Re-check thesis with AI"}
         </button>
       </div>
+
+      <ConvictionReRate
+        ticker={ticker}
+        currentRating={thesis.convictionRating}
+        ratedAt={thesis.convictionRatedAt}
+        currentNotes={thesis.convictionNotes}
+        initialTrajectory={initialConvictionTrajectory}
+      />
 
       {thesis.lastInvalidationCheckAt ? (
         <InvalidationVerdict

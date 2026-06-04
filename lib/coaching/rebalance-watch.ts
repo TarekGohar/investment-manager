@@ -21,6 +21,12 @@ export type RebalanceFiredEvent = {
   ticker: null;
   message: string;
   data: Record<string, unknown>;
+  recommendedAction: "REBALANCE";
+  urgency: "MATERIAL";
+  rationale: string;
+  actionDetails: Record<string, unknown>;
+  supportingEvidence: Record<string, unknown>;
+  invalidationTrigger: string;
 };
 
 const DEFAULT_MIN_CONSECUTIVE_DAYS = 3;
@@ -140,6 +146,8 @@ function formatRebalanceEvent(
 
   const message = `${headline} ${action}`;
 
+  const rationale = `${breach.category} bucket is ${isOverweight ? "above" : "below"} target by ${Math.abs(breach.driftPct).toFixed(1)}pp (${breach.actualPct.toFixed(1)}% actual vs ${breach.targetPct.toFixed(1)}% target). Sustained breach across snapshots — not single-day noise. ${mirror ? `Pair with ${mirror.category} which is the most-opposite drift.` : `No clear mirror bucket; deploy to/from cash.`}`;
+
   return {
     userId,
     ticker: null,
@@ -157,6 +165,25 @@ function formatRebalanceEvent(
       mirrorActualPct: mirror?.actualPct ?? null,
       mirrorTargetPct: mirror?.targetPct ?? null,
     },
+    recommendedAction: "REBALANCE",
+    urgency: "MATERIAL",
+    rationale,
+    actionDetails: {
+      breachedCategory: breach.category,
+      direction,
+      mirrorCategory: mirror?.category ?? null,
+      driftDollars,
+    },
+    supportingEvidence: {
+      actualPct: breach.actualPct,
+      targetPct: breach.targetPct,
+      driftPct: breach.driftPct,
+      driftDollars,
+      totalMarketValue,
+      mirrorActualPct: mirror?.actualPct ?? null,
+      mirrorTargetPct: mirror?.targetPct ?? null,
+    },
+    invalidationTrigger: `${breach.category} drifts back inside the threshold on its own (via price moves), OR you record a corresponding TRIM/BUY transaction that closes the gap.`,
   };
 }
 

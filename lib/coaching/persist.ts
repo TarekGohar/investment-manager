@@ -2,7 +2,8 @@ import "server-only";
 import { prisma } from "@/lib/prisma";
 import { sendAlertDigest } from "@/lib/email";
 import { getUserPreferences } from "@/lib/preferences";
-import type { AlertRule, Prisma } from "@/generated/prisma";
+import { createDecisionEvent } from "@/lib/alerts/hub";
+import type { AlertRule } from "@/generated/prisma";
 
 /**
  * Persist coaching events through the platform's system-alert pipe. Used by
@@ -34,15 +35,16 @@ export async function persistCoachingEvents(
   for (const [userId, userEvents] of byUser) {
     try {
       const alert = await ensureSystemAlert(userId, rule);
-      await prisma.alertEvent.createMany({
-        data: userEvents.map((e) => ({
-          alertId: alert.id,
+      for (const e of userEvents) {
+        await createDecisionEvent({
           userId,
+          source: "CRON_RULE",
+          alertId: alert.id,
           ticker: e.ticker,
           message: e.message,
-          data: e.data as Prisma.InputJsonValue,
-        })),
-      });
+          data: e.data,
+        });
+      }
 
       // Email digest — same gates as user-configured alerts.
       const prefs = await getUserPreferences(userId);
