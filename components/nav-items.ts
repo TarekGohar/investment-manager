@@ -31,7 +31,7 @@ export const NAV: NavItem[] = [
   { label: "Policy", href: "/policy", icon: PortfolioIcon },
   { label: "Annual review", href: "/annual-review", icon: ChatIcon },
   { label: "Transactions", href: "/transactions", icon: TransactionsIcon },
-  { label: "AI Chat", href: "/chat", icon: ChatIcon },
+  { label: "Speak to PM", href: "/chat", icon: ChatIcon },
   { label: "Alerts", href: "/alerts", icon: AlertsIcon },
 ];
 

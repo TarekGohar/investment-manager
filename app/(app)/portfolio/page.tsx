@@ -18,6 +18,7 @@ import { findMissingPositions } from "@/lib/portfolio/missing-positions";
 import { MissingPositionsCard } from "@/components/missing-positions-card";
 import { PortfolioByAccount } from "@/components/portfolio-by-account";
 import { NetWorthCard } from "@/components/net-worth-card";
+import { Tabs, type Tab } from "@/components/tabs";
 import { Term } from "@/components/term";
 import { getFxRateToCad } from "@/lib/marketdata/fx";
 import { prisma } from "@/lib/prisma";
@@ -114,165 +115,184 @@ export default async function PortfolioPage() {
     );
   }
 
+  const overviewTab = (
+    <>
+      <NetWorthCard
+        assetsCad={portfolio.totalMarketValue}
+        cashCad={cashCad}
+        cashByCurrency={cashSummary.totalsByCurrency}
+      />
+
+      <MissingPositionsCard positions={missingPositions} />
+
+      <div className="mb-2 text-xs text-muted-2">All totals below are in CAD-equivalent (today&apos;s BoC rate).</div>
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        <Stat
+          label={portfolio.hasAnyQuote ? "Market value (CAD)" : <><Term>Cost basis</Term> (CAD)</>}
+          value={formatCurrency(
+            portfolio.hasAnyQuote ? portfolio.totalMarketValue : portfolio.totalCost,
+          )}
+        />
+        <Stat
+          label={<><Term>Unrealized</Term> (CAD)</>}
+          value={portfolio.hasAnyQuote ? formatSignedCurrency(portfolio.totalUnrealized) : "—"}
+          secondary={portfolio.hasAnyQuote ? formatPercent(portfolio.totalUnrealizedPct) : undefined}
+          tone={portfolio.hasAnyQuote ? (portfolio.totalUnrealized >= 0 ? "up" : "down") : undefined}
+        />
+        <Stat
+          label={<><Term term="Realized P&L">Realized P&amp;L</Term> (CAD)</>}
+          value={formatSignedCurrency(portfolio.totalRealized)}
+          tone={portfolio.totalRealized === 0 ? undefined : portfolio.totalRealized > 0 ? "up" : "down"}
+        />
+        <Stat
+          label="Dividends (CAD)"
+          value={formatCurrency(portfolio.totalDividends)}
+        />
+      </div>
+    </>
+  );
+
+  const holdingsTab = (
+    <>
+      <div className="rounded-card border border-border bg-panel">
+        <div className="flex items-center justify-between px-4 py-5 md:px-6">
+          <h2 className="text-[16px] font-semibold">All holdings</h2>
+          <span className="text-sm text-muted">{portfolio.holdings.length} positions</span>
+        </div>
+
+        <div className="overflow-x-auto">
+          <div className="min-w-[980px]">
+            <div className="grid grid-cols-[1.6fr_0.55fr_0.8fr_0.8fr_0.6fr_0.8fr_0.9fr_0.7fr_0.5fr] gap-3 border-t border-border px-4 py-3 text-xs font-semibold uppercase tracking-wide text-muted md:px-6">
+              <div>Position</div>
+              <div className="text-right">Qty</div>
+              <div className="text-right"><Term>Cost/sh</Term></div>
+              <div className="text-right">Price</div>
+              <div className="text-right">Day</div>
+              <div className="text-right">Value</div>
+              <div className="text-right"><Term>Unrealized</Term></div>
+              <div className="text-right">Location</div>
+              <div className="text-right">Wt</div>
+            </div>
+
+            {portfolio.holdings.map((h) => {
+              // Weight: always CAD-on-CAD so cross-currency positions compare
+              // fairly. The displayed Value column stays in the position's
+              // native currency.
+              const refValueCad = h.marketValueCad ?? h.costBasisCad;
+              const denomCad = portfolio.hasAnyQuote
+                ? portfolio.totalMarketValue
+                : portfolio.totalCost;
+              const weight = denomCad > 0 ? (refValueCad / denomCad) * 100 : 0;
+              const refValueNative = h.marketValue ?? h.costBasis;
+              const dayUp = (h.dayChangePct ?? 0) >= 0;
+              const unrealizedUp = (h.unrealized ?? 0) >= 0;
+              const locScore = locationOverview?.byTicker.get(h.ticker)?.worstScore;
+              return (
+                <Link
+                  key={h.ticker}
+                  href={`/positions/${h.ticker}`}
+                  className="grid grid-cols-[1.6fr_0.55fr_0.8fr_0.8fr_0.6fr_0.8fr_0.9fr_0.7fr_0.5fr] items-center gap-3 border-t border-border px-4 py-4 transition-colors hover:bg-hover md:px-6"
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <TickerBadge ticker={h.ticker} />
+                    <div className="min-w-0">
+                      <div className="truncate text-[15px] font-semibold">{h.ticker}</div>
+                      <div className="truncate text-xs text-muted">
+                        Opened {h.openedAt.toLocaleDateString("en-US", { month: "short", year: "numeric" })}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="text-right text-[14px] tabular-nums">{formatQty(h.quantity)}</div>
+                  <div className="text-right text-[14px] tabular-nums">
+                    {formatCurrency(h.quantity > 0 ? h.costBasis / h.quantity : 0)}
+                    <span className="ml-1 text-[10px] font-semibold uppercase text-muted-2">
+                      {h.currency}
+                    </span>
+                  </div>
+                  <div className="text-right text-[14px] tabular-nums">
+                    {h.marketPrice != null ? formatCurrency(h.marketPrice) : "—"}
+                  </div>
+                  <div
+                    className={`text-right text-[14px] font-semibold tabular-nums ${
+                      h.dayChangePct == null ? "text-muted" : dayUp ? "text-success" : "text-danger"
+                    }`}
+                  >
+                    {h.dayChangePct != null ? formatPercent(h.dayChangePct) : "—"}
+                  </div>
+                  <div className="text-right text-[14px] font-semibold tabular-nums">
+                    {formatCurrency(refValueNative)}
+                    <span className="ml-1 text-[10px] font-semibold uppercase text-muted-2">
+                      {h.currency}
+                    </span>
+                  </div>
+                  <div
+                    className={`text-right text-[14px] font-semibold tabular-nums ${
+                      h.unrealized == null
+                        ? "text-muted"
+                        : unrealizedUp
+                          ? "text-success"
+                          : "text-danger"
+                    }`}
+                  >
+                    {h.unrealized != null ? formatSignedCurrency(h.unrealized) : "—"}
+                  </div>
+                  <div className="flex justify-end">
+                    {locScore ? <LocationBadge score={locScore} size="sm" /> : null}
+                  </div>
+                  <div className="text-right text-[14px] text-muted tabular-nums">
+                    {weight.toFixed(1)}%
+                  </div>
+                </Link>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      {portfolio.quoteAsOf ? (
+        <p className="mt-4 text-xs text-muted-2">
+          Prices as of {portfolio.quoteAsOf.toLocaleString()} · Finnhub (15-min delayed)
+        </p>
+      ) : null}
+    </>
+  );
+
+  const positionsTab = (
+    <>
+      {holdingsTab}
+      <div className="mt-[26px]">
+        <PortfolioByAccount portfolio={portfolio} brokerages={brokerageInfo} />
+      </div>
+      {correlation ? (
+        <div className="mt-[26px]">
+          <CorrelationHeatmap data={correlation} />
+        </div>
+      ) : null}
+    </>
+  );
+
+  const incomeAndCashTab = (
+    <>
+      <CashBalances summary={cashSummary} />
+      {upcomingDividends.length > 0 ? (
+        <div className="mt-[26px]">
+          <UpcomingDividends dividends={upcomingDividends} />
+        </div>
+      ) : null}
+    </>
+  );
+
+  const tabs: Tab[] = [
+    { key: "Overview", content: overviewTab },
+    { key: "Positions", content: positionsTab },
+    { key: "Cash & income", content: incomeAndCashTab },
+  ];
+
   return (
     <>
       <Topbar title="Portfolio" />
       <div className="px-4 pb-12 pt-6 md:px-6 lg:px-[34px] lg:pt-[30px] lg:pb-[60px]">
-        <NetWorthCard
-          assetsCad={portfolio.totalMarketValue}
-          cashCad={cashCad}
-          cashByCurrency={cashSummary.totalsByCurrency}
-        />
-
-        <MissingPositionsCard positions={missingPositions} />
-
-        <div className="mb-2 text-xs text-muted-2">All totals below are in CAD-equivalent (today&apos;s BoC rate).</div>
-        <div className="mb-8 grid grid-cols-2 gap-3 md:grid-cols-4">
-          <Stat
-            label={portfolio.hasAnyQuote ? "Market value (CAD)" : <><Term>Cost basis</Term> (CAD)</>}
-            value={formatCurrency(
-              portfolio.hasAnyQuote ? portfolio.totalMarketValue : portfolio.totalCost,
-            )}
-          />
-          <Stat
-            label={<><Term>Unrealized</Term> (CAD)</>}
-            value={portfolio.hasAnyQuote ? formatSignedCurrency(portfolio.totalUnrealized) : "—"}
-            secondary={portfolio.hasAnyQuote ? formatPercent(portfolio.totalUnrealizedPct) : undefined}
-            tone={portfolio.hasAnyQuote ? (portfolio.totalUnrealized >= 0 ? "up" : "down") : undefined}
-          />
-          <Stat
-            label={<><Term term="Realized P&L">Realized P&amp;L</Term> (CAD)</>}
-            value={formatSignedCurrency(portfolio.totalRealized)}
-            tone={portfolio.totalRealized === 0 ? undefined : portfolio.totalRealized > 0 ? "up" : "down"}
-          />
-          <Stat
-            label="Dividends (CAD)"
-            value={formatCurrency(portfolio.totalDividends)}
-          />
-        </div>
-
-        <div className="rounded-card border border-border bg-panel">
-          <div className="flex items-center justify-between px-4 py-5 md:px-6">
-            <h2 className="text-[16px] font-semibold">All holdings</h2>
-            <span className="text-sm text-muted">{portfolio.holdings.length} positions</span>
-          </div>
-
-          <div className="overflow-x-auto">
-            <div className="min-w-[980px]">
-          <div className="grid grid-cols-[1.6fr_0.55fr_0.8fr_0.8fr_0.6fr_0.8fr_0.9fr_0.7fr_0.5fr] gap-3 border-t border-border px-4 py-3 text-xs font-semibold uppercase tracking-wide text-muted md:px-6">
-            <div>Position</div>
-            <div className="text-right">Qty</div>
-            <div className="text-right"><Term>Cost/sh</Term></div>
-            <div className="text-right">Price</div>
-            <div className="text-right">Day</div>
-            <div className="text-right">Value</div>
-            <div className="text-right"><Term>Unrealized</Term></div>
-            <div className="text-right">Location</div>
-            <div className="text-right">Wt</div>
-          </div>
-
-          {portfolio.holdings.map((h) => {
-            // Weight: always CAD-on-CAD so cross-currency positions compare
-            // fairly. The displayed Value column stays in the position's
-            // native currency.
-            const refValueCad = h.marketValueCad ?? h.costBasisCad;
-            const denomCad = portfolio.hasAnyQuote
-              ? portfolio.totalMarketValue
-              : portfolio.totalCost;
-            const weight = denomCad > 0 ? (refValueCad / denomCad) * 100 : 0;
-            const refValueNative = h.marketValue ?? h.costBasis;
-            const dayUp = (h.dayChangePct ?? 0) >= 0;
-            const unrealizedUp = (h.unrealized ?? 0) >= 0;
-            const locScore = locationOverview?.byTicker.get(h.ticker)?.worstScore;
-            return (
-              <Link
-                key={h.ticker}
-                href={`/positions/${h.ticker}`}
-                className="grid grid-cols-[1.6fr_0.55fr_0.8fr_0.8fr_0.6fr_0.8fr_0.9fr_0.7fr_0.5fr] items-center gap-3 border-t border-border px-4 py-4 transition-colors hover:bg-hover md:px-6"
-              >
-                <div className="flex items-center gap-3 min-w-0">
-                  <TickerBadge ticker={h.ticker} />
-                  <div className="min-w-0">
-                    <div className="truncate text-[15px] font-semibold">{h.ticker}</div>
-                    <div className="truncate text-xs text-muted">
-                      Opened {h.openedAt.toLocaleDateString("en-US", { month: "short", year: "numeric" })}
-                    </div>
-                  </div>
-                </div>
-                <div className="text-right text-[14px] tabular-nums">{formatQty(h.quantity)}</div>
-                <div className="text-right text-[14px] tabular-nums">
-                  {formatCurrency(h.quantity > 0 ? h.costBasis / h.quantity : 0)}
-                  <span className="ml-1 text-[10px] font-semibold uppercase text-muted-2">
-                    {h.currency}
-                  </span>
-                </div>
-                <div className="text-right text-[14px] tabular-nums">
-                  {h.marketPrice != null ? formatCurrency(h.marketPrice) : "—"}
-                </div>
-                <div
-                  className={`text-right text-[14px] font-semibold tabular-nums ${
-                    h.dayChangePct == null ? "text-muted" : dayUp ? "text-success" : "text-danger"
-                  }`}
-                >
-                  {h.dayChangePct != null ? formatPercent(h.dayChangePct) : "—"}
-                </div>
-                <div className="text-right text-[14px] font-semibold tabular-nums">
-                  {formatCurrency(refValueNative)}
-                  <span className="ml-1 text-[10px] font-semibold uppercase text-muted-2">
-                    {h.currency}
-                  </span>
-                </div>
-                <div
-                  className={`text-right text-[14px] font-semibold tabular-nums ${
-                    h.unrealized == null
-                      ? "text-muted"
-                      : unrealizedUp
-                        ? "text-success"
-                        : "text-danger"
-                  }`}
-                >
-                  {h.unrealized != null ? formatSignedCurrency(h.unrealized) : "—"}
-                </div>
-                <div className="flex justify-end">
-                  {locScore ? <LocationBadge score={locScore} size="sm" /> : null}
-                </div>
-                <div className="text-right text-[14px] text-muted tabular-nums">
-                  {weight.toFixed(1)}%
-                </div>
-              </Link>
-            );
-          })}
-            </div>
-          </div>
-        </div>
-
-        {portfolio.quoteAsOf ? (
-          <p className="mt-4 text-xs text-muted-2">
-            Prices as of {portfolio.quoteAsOf.toLocaleString()} · Finnhub (15-min delayed)
-          </p>
-        ) : null}
-
-        {portfolio.holdings.length > 0 ? (
-          <div className="mt-[26px]">
-            <PortfolioByAccount portfolio={portfolio} brokerages={brokerageInfo} />
-          </div>
-        ) : null}
-
-        {upcomingDividends.length > 0 ? (
-          <div className="mt-[26px]">
-            <UpcomingDividends dividends={upcomingDividends} />
-          </div>
-        ) : null}
-
-        <div className="mt-[26px]">
-          <CashBalances summary={cashSummary} />
-        </div>
-
-        {correlation ? (
-          <div className="mt-[26px]">
-            <CorrelationHeatmap data={correlation} />
-          </div>
-        ) : null}
+        <Tabs tabs={tabs} />
       </div>
     </>
   );

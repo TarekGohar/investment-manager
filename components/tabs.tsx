@@ -22,7 +22,7 @@ export function Tabs({
 
   return (
     <>
-      <div className="mb-[26px] flex gap-[26px] overflow-x-auto border-b border-border [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      <div className="mb-[26px] flex gap-[26px] overflow-x-auto overflow-y-hidden border-b border-border [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {tabs.map((t) => {
           const isActive = t.key === active;
           return (

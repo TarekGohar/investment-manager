@@ -4,6 +4,7 @@ import { auth } from "@/lib/auth";
 import { getModel, getProvider } from "@/lib/ai";
 import { PM_PERSONA } from "@/lib/ai/persona";
 import { buildTools } from "@/lib/ai/tools";
+import { clearAborter, registerAborter } from "@/lib/ai/chat-aborters";
 import {
   getOrCreateConversation,
   listMessages,
@@ -52,16 +53,27 @@ export async function POST(req: Request) {
 
   const encoder = new TextEncoder();
   const aborter = new AbortController();
-  // If the client disconnects, propagate the abort upstream to OpenAI
-  if (req.signal) {
-    req.signal.addEventListener("abort", () => aborter.abort(), { once: true });
-  }
+  // We deliberately do NOT propagate `req.signal` to `aborter`. Mobile
+  // browsers tear down the connection when a tab is backgrounded; aborting
+  // the upstream model call on that signal would throw away the in-progress
+  // turn. Instead, the only way to cancel an upstream call is via the
+  // companion /api/ai/chat/stop endpoint, which the Stop button hits.
+  registerAborter(conversation.id, aborter);
+  let clientGone = false;
 
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       const send = (event: string, data: unknown) => {
-        const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
-        controller.enqueue(encoder.encode(payload));
+        if (clientGone) return;
+        try {
+          const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+          controller.enqueue(encoder.encode(payload));
+        } catch {
+          // Stream was closed by the consumer (client disconnected). Stop
+          // attempting to push frames but let the surrounding work finish
+          // so the assistant message gets persisted.
+          clientGone = true;
+        }
       };
 
       send("meta", { conversationId: conversation.id, model });
@@ -190,20 +202,27 @@ export async function POST(req: Request) {
         }
 
         send("done", { usage, aborted: aborter.signal.aborted });
-        controller.close();
+        if (!clientGone) controller.close();
       } catch (err) {
         if (aborter.signal.aborted) {
-          // Client cancelled — close gracefully without surfacing an error
+          // Explicit cancellation via /api/ai/chat/stop. Don't persist a
+          // partial assistant message — treat it as if the turn never
+          // happened on the assistant side (the user message remains).
           send("done", { aborted: true });
         } else {
           const message = err instanceof Error ? err.message : "Stream failed";
           send("error", { error: message });
         }
-        controller.close();
+        if (!clientGone) controller.close();
+      } finally {
+        clearAborter(conversation.id, aborter);
       }
     },
     cancel() {
-      aborter.abort();
+      // Client disconnected (tab backgrounded, navigated away, fetch
+      // aborted). Stop enqueueing into the closed stream, but let the
+      // upstream model call continue so the answer reaches the DB.
+      clientGone = true;
     },
   });
 

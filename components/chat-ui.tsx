@@ -1,13 +1,46 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChatMenu } from "@/components/conversations-sidebar";
 import { SparkleIcon } from "@/components/icons";
 import { Markdown } from "@/components/markdown";
 import { AI_USAGE_REFRESH_EVENT } from "@/lib/events";
 import type { ConversationSummary } from "@/lib/ai/queries";
+import type { ToolCall } from "@/lib/ai/types";
 
 type ToolStatus = "calling" | "done" | "error";
+
+// Shape returned by GET /api/ai/conversations/[id]/messages. Mirrors
+// StoredMessage from lib/ai/queries.ts but typed locally so this client
+// component doesn't pull in the server-only module.
+type StoredMessageRow = {
+  id: string;
+  role: "user" | "assistant" | "tool";
+  text: string;
+  toolCalls?: ToolCall[];
+};
+
+function toDisplayMessages(rows: StoredMessageRow[]): DisplayMessage[] {
+  return rows
+    .filter((m) => m.role !== "tool")
+    .map<DisplayMessage>((m) => {
+      if (m.role === "user") {
+        return { role: "user", id: m.id, text: m.text };
+      }
+      const tools: ToolUse[] = (m.toolCalls ?? []).map((tc) => ({
+        id: tc.id,
+        name: tc.name,
+        status: "done" as const,
+      }));
+      return {
+        role: "assistant",
+        id: m.id,
+        text: m.text,
+        tools,
+        streaming: false,
+      };
+    });
+}
 
 type ToolUse = {
   id: string;
@@ -74,6 +107,17 @@ export function ChatUI({
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  // Mirrors of state used inside event handlers that would otherwise capture
+  // stale closures (e.g. the visibilitychange listener).
+  const messagesRef = useRef(messages);
+  const conversationIdRef = useRef(conversationId);
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+  useEffect(() => {
+    conversationIdRef.current = conversationId;
+  }, [conversationId]);
+  const userStoppedRef = useRef(false);
 
   const suggestions = useMemo(
     () =>
@@ -95,6 +139,43 @@ export function ChatUI({
     el.style.height = "auto";
     el.style.height = Math.min(el.scrollHeight, 200) + "px";
   }, [input]);
+
+  // Reconciles in-flight assistant message(s) with the persisted server state.
+  // Mobile browsers tear down the SSE connection when the tab is backgrounded,
+  // so the client-side stream ends in an error even though the server route
+  // keeps going and persists the answer. When the user returns we refetch
+  // the conversation and replace any stuck/errored assistant message with
+  // the version the server actually saved.
+  const reconcileFromServer = useCallback(async () => {
+    const convId = conversationIdRef.current;
+    if (!convId) return;
+    try {
+      const res = await fetch(`/api/ai/conversations/${convId}/messages`, {
+        cache: "no-store",
+      });
+      if (!res.ok) return;
+      const data = (await res.json()) as { messages: StoredMessageRow[] };
+      const fresh = toDisplayMessages(data.messages);
+      setMessages(fresh);
+    } catch {
+      // Best-effort — leave UI as is if the refetch fails.
+    }
+  }, []);
+
+  // On tab focus regained, if we have a stuck assistant message, refetch.
+  useEffect(() => {
+    function handleVisibility() {
+      if (document.visibilityState !== "visible") return;
+      const stuck = messagesRef.current.some(
+        (m) => m.role === "assistant" && (m.streaming || m.error),
+      );
+      if (!stuck) return;
+      void reconcileFromServer();
+    }
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () =>
+      document.removeEventListener("visibilitychange", handleVisibility);
+  }, [reconcileFromServer]);
 
   async function send(text: string) {
     const userMessage: DisplayMessage = {
@@ -137,14 +218,20 @@ export function ChatUI({
               }
               case "text":
                 return { ...m, text: m.text + data.delta };
-              case "tool_call":
+              case "tool_call": {
+                // If the model already streamed some prose, insert a paragraph
+                // break so any post-tool prose renders as a new paragraph
+                // rather than gluing onto the previous sentence.
+                const needsBreak = m.text.length > 0 && !m.text.endsWith("\n\n");
                 return {
                   ...m,
+                  text: needsBreak ? m.text + "\n\n" : m.text,
                   tools: [
                     ...m.tools,
                     { id: data.id, name: data.name, status: "calling" },
                   ],
                 };
+              }
               case "tool_result":
                 return {
                   ...m,
@@ -189,9 +276,38 @@ export function ChatUI({
     // The route persists token usage before closing the stream, so by now the
     // DB reflects this turn — nudge the navbar counter to refetch and stay live.
     window.dispatchEvent(new Event(AI_USAGE_REFRESH_EVENT));
+
+    // If the stream ended unhappily (network drop, server error) and the user
+    // didn't explicitly stop, the server may have continued and persisted the
+    // answer anyway. Reconcile from the DB so the user sees the real result
+    // instead of a stranded error pill.
+    const wasUserStopped = userStoppedRef.current;
+    userStoppedRef.current = false;
+    if (!wasUserStopped) {
+      const stuck = messagesRef.current.find(
+        (m) => m.id === assistantId && m.role === "assistant" && (m.streaming || m.error),
+      );
+      if (stuck) {
+        void reconcileFromServer();
+      }
+    }
   }
 
   function stop() {
+    userStoppedRef.current = true;
+    // Tell the server to cancel the upstream model call. Best-effort:
+    // on serverless this may miss if the /stop request lands on a
+    // different instance than the /chat request, but on this app's
+    // traffic profile they typically share a warm lambda. We fire-and-
+    // forget so the UI can close immediately.
+    const convId = conversationIdRef.current;
+    if (convId) {
+      void fetch("/api/ai/chat/stop", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ conversationId: convId }),
+      }).catch(() => {});
+    }
     abortRef.current?.abort();
   }
 
