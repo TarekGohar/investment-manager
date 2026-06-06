@@ -14,17 +14,6 @@ const nextConfig: NextConfig = {
     "yahoo-finance2",
     "openai",
   ],
-  async redirects() {
-    return [
-      { source: "/alerts", destination: "/decisions", permanent: true },
-      { source: "/alerts/:path*", destination: "/decisions/:path*", permanent: true },
-      { source: "/watchlist", destination: "/research", permanent: true },
-      { source: "/markets", destination: "/research", permanent: true },
-      { source: "/tax", destination: "/review", permanent: true },
-      { source: "/policy", destination: "/review", permanent: true },
-      { source: "/annual-review", destination: "/review", permanent: true },
-    ];
-  },
 };
 
 export default nextConfig;
