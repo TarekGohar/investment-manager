@@ -57,8 +57,8 @@ export async function recordDecisionOutcomeAction(input: {
     return { ok: false, error: message };
   }
 
-  revalidatePath("/alerts");
-  revalidatePath(`/alerts/${input.eventId}`);
+  revalidatePath("/decisions");
+  revalidatePath(`/decisions/${input.eventId}`);
   return { ok: true };
 }
 
@@ -79,8 +79,8 @@ export async function markAlertEventReadAction(input: {
     return { ok: false, error: message };
   }
 
-  revalidatePath("/alerts");
-  revalidatePath(`/alerts/${input.eventId}`);
+  revalidatePath("/decisions");
+  revalidatePath(`/decisions/${input.eventId}`);
   return { ok: true };
 }
 
@@ -126,7 +126,7 @@ export async function raiseManualDecisionAction(input: {
       reviewEvent: input.reviewEvent?.trim() || null,
       reviewByDate,
     });
-    revalidatePath("/alerts");
+    revalidatePath("/decisions");
     if (input.ticker) revalidatePath(`/positions/${input.ticker.toUpperCase()}`);
     return { ok: true, eventId: event.id };
   } catch (err) {

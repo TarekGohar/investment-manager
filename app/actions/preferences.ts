@@ -42,7 +42,7 @@ export async function setTaxProfileAction(
 
   await setTaxProfile(session.user.id, profile);
   revalidatePath("/settings");
-  revalidatePath("/tax");
+  revalidatePath("/review");
   return { ok: true };
 }
 

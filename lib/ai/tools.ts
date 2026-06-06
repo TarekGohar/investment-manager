@@ -1225,7 +1225,7 @@ export function buildTools(
           return {
             ok: true,
             decisionId: event.id,
-            url: `/alerts/${event.id}`,
+            url: `/decisions/${event.id}`,
             message: "Decision recorded. Tell the user it's in their Decisions inbox.",
           };
         } catch (err) {

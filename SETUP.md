@@ -147,7 +147,7 @@ If `MAILGUN_API_KEY` is unset, every email sender silently falls back to a conso
 | `/api/cron/weekly-review` | `0 13 * * 0` | Sunday morning — generates the weekly deep-dive. Respects `aiAutoWeeklyReview`. |
 
 Vercel Cron runs every job automatically once you deploy. For local dev, none of these run on a schedule — use the in-app manual triggers:
-- **`/alerts` → "Run now"** — evaluates alerts immediately
+- **`/decisions` → "Run now"** — evaluates alerts immediately
 - **Dashboard PM's read card → "Regenerate"** — generates a fresh daily review
 - **Settings → Preferences** — toggle AI background jobs on/off per user
 

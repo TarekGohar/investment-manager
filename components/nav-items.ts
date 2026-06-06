@@ -7,7 +7,6 @@ import {
   PortfolioIcon,
   SettingsIcon,
   TransactionsIcon,
-  WatchlistIcon,
 } from "@/components/icons";
 
 export type NavItem = {
@@ -17,23 +16,31 @@ export type NavItem = {
   matchPrefixes?: string[];
 };
 
-export const NAV: NavItem[] = [
-  { label: "Home", href: "/", icon: HomeIcon },
+export type NavSection = {
+  label?: string;
+  items: NavItem[];
+};
+
+export const NAV_SECTIONS: NavSection[] = [
   {
-    label: "Portfolio",
-    href: "/portfolio",
-    icon: PortfolioIcon,
-    matchPrefixes: ["/portfolio", "/positions"],
+    items: [
+      { label: "Home", href: "/", icon: HomeIcon },
+      { label: "Decisions", href: "/decisions", icon: AlertsIcon },
+      {
+        label: "Portfolio",
+        href: "/portfolio",
+        icon: PortfolioIcon,
+        matchPrefixes: ["/portfolio", "/positions"],
+      },
+      { label: "Transactions", href: "/transactions", icon: TransactionsIcon },
+      { label: "Research", href: "/research", icon: MarketsIcon },
+      { label: "Review", href: "/review", icon: PortfolioIcon },
+      { label: "Speak to PM", href: "/chat", icon: ChatIcon },
+    ],
   },
-  { label: "Watchlist", href: "/watchlist", icon: WatchlistIcon },
-  { label: "Markets", href: "/markets", icon: MarketsIcon },
-  { label: "Tax", href: "/tax", icon: TransactionsIcon },
-  { label: "Policy", href: "/policy", icon: PortfolioIcon },
-  { label: "Annual review", href: "/annual-review", icon: ChatIcon },
-  { label: "Transactions", href: "/transactions", icon: TransactionsIcon },
-  { label: "Speak to PM", href: "/chat", icon: ChatIcon },
-  { label: "Alerts", href: "/alerts", icon: AlertsIcon },
 ];
+
+export const NAV: NavItem[] = NAV_SECTIONS.flatMap((s) => s.items);
 
 export const SETTINGS_NAV: NavItem = {
   label: "Settings",

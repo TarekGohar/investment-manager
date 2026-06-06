@@ -215,7 +215,7 @@ export default async function DashboardPage() {
                 </p>
               </div>
               <Link
-                href="/tax"
+                href="/review"
                 className="rounded-[10px] border border-border bg-panel px-3 py-1.5 text-[12px] font-semibold text-text transition-colors hover:bg-panel-2"
               >
                 Open tax view

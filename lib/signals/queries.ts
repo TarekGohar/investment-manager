@@ -25,7 +25,7 @@ export type AlertEventItem = {
  * Coaching rules are platform-driven (TLH watcher, rebalance watcher,
  * thesis-invalidation watcher). They get system Alert rows so events have
  * something to attach to, but they're not user-configurable — exclude from
- * the /alerts management UI.
+ * the /decisions management UI.
  */
 const COACHING_RULES = new Set([
   "TLH_OPPORTUNITY",

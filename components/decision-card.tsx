@@ -62,7 +62,7 @@ export function DecisionCard({ event, closed }: { event: EventWithAlert; closed?
   const action = event.recommendedAction;
   return (
     <Link
-      href={`/alerts/${event.id}`}
+      href={`/decisions/${event.id}`}
       className="group block rounded-card border border-border bg-panel px-4 py-3 transition-colors hover:border-border-2"
     >
       <div className="flex flex-wrap items-center gap-2 text-xs">

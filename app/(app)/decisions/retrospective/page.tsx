@@ -42,7 +42,7 @@ export default async function RetrospectivePage() {
     <>
       <Topbar title="Decision retrospective" />
       <div className="space-y-8 px-4 pb-12 pt-6 md:px-6 lg:px-[34px] lg:pt-[30px] lg:pb-[60px]">
-        <Link href="/alerts" className="inline-block text-xs text-muted hover:text-text">
+        <Link href="/decisions" className="inline-block text-xs text-muted hover:text-text">
           ← Back to inbox
         </Link>
 

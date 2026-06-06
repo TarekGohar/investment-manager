@@ -61,7 +61,7 @@ export async function upsertContributionRoomAction(input: {
   });
 
   revalidatePath("/settings");
-  revalidatePath("/tax");
+  revalidatePath("/review");
   return { ok: true };
 }
 
@@ -77,6 +77,6 @@ export async function deleteContributionRoomAction(
   }
   await prisma.contributionRoom.delete({ where: { id } });
   revalidatePath("/settings");
-  revalidatePath("/tax");
+  revalidatePath("/review");
   return { ok: true };
 }

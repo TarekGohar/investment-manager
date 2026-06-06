@@ -60,11 +60,11 @@ export async function Topbar({ title, backHref, rightSlot }: TopbarProps) {
       </div>
 
       <Link
-        href="/alerts"
+        href="/decisions"
         aria-label={
           showBadge && notifications > 0
-            ? `Alerts — ${notifications} unread`
-            : "Alerts"
+            ? `Decisions — ${notifications} unread`
+            : "Decisions"
         }
         className="relative hidden h-10 w-10 shrink-0 items-center justify-center rounded-full bg-panel text-text transition-colors hover:bg-panel-2 sm:flex"
       >

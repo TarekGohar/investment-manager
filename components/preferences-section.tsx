@@ -49,18 +49,18 @@ const GROUPS: Group[] = [
         key: "silentUnlessMaterial",
         title: "Silent unless material",
         description:
-          "Only email when a material event fires (NEWS_MATERIAL today; thesis-invalidation, IPS drift, and TLH opportunities in upcoming sessions). Low-signal alerts still appear in /alerts but stay out of email. Turn off to email every fired event.",
+          "Only email when a material event fires (NEWS_MATERIAL today; thesis-invalidation, IPS drift, and TLH opportunities in upcoming sessions). Low-signal alerts still appear in /decisions but stay out of email. Turn off to email every fired event.",
       },
       {
         key: "showNotificationBadge",
         title: "Show unread badge in topbar",
-        description: "When off, the bell icon never shows a count — visit /alerts to see new events.",
+        description: "When off, the bell icon never shows a count — visit /decisions to see new events.",
       },
       {
         key: "autoMarkEventsRead",
         title: "Auto-mark events as read on visit",
         description:
-          "Marks all unread events as read when you open /alerts. Disable to mark them manually.",
+          "Marks all unread events as read when you open /decisions. Disable to mark them manually.",
       },
     ],
   },

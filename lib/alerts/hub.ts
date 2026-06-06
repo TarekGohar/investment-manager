@@ -147,7 +147,7 @@ export async function listOpenDecisions(args: {
 /**
  * Notification-only events: AlertEvents that DO NOT carry a recommendedAction
  * (price moves, generic news flags, etc.). These show up in the unified
- * /alerts inbox alongside decision-grade events but don't have an action
+ * /decisions inbox alongside decision-grade events but don't have an action
  * button — the user just reads them and marks them as read.
  */
 export async function listRecentNotifications(args: {

@@ -12,7 +12,7 @@ type EventWithAlert = AlertEvent & { alert: { rule: AlertRule } };
 export function NotificationCard({ event }: { event: EventWithAlert }) {
   return (
     <Link
-      href={`/alerts/${event.id}`}
+      href={`/decisions/${event.id}`}
       className={`group block rounded-card border px-4 py-2.5 transition-colors hover:border-border-2 ${
         event.read ? "border-border bg-panel/50" : "border-border bg-panel"
       }`}

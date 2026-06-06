@@ -61,13 +61,13 @@ export type UserPreferences = {
    * MATERIAL/CRITICAL. Future sessions add TLH_OPPORTUNITY,
    * REBALANCE_DUE, THESIS_INVALIDATION_CANDIDATE — all material by
    * design. Low-signal rules (PRICE_MOVE, MA_CROSS, VOLUME_SPIKE,
-   * routine DRAWDOWN) still write AlertEvents (visible in /alerts) but
+   * routine DRAWDOWN) still write AlertEvents (visible in /decisions) but
    * stay out of email. Set to false to email every fired event.
    */
   silentUnlessMaterial: boolean;
   /** Whether the topbar bell shows the unread count badge. */
   showNotificationBadge: boolean;
-  /** Whether visiting /alerts auto-clears unread events. */
+  /** Whether visiting /decisions auto-clears unread events. */
   autoMarkEventsRead: boolean;
 
   // ─── Position page ─────────────────────────────────────────────

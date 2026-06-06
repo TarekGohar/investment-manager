@@ -29,7 +29,7 @@ export type OpenRecommendation = {
  *     hasn't responded with "plan it" or "dismiss")
  *
  * Capped at a reasonable display count (12) — if there's more, the user
- * should be on /alerts triaging anyway.
+ * should be on /decisions triaging anyway.
  */
 export async function listOpenRecommendations(userId: string): Promise<OpenRecommendation[]> {
   const [plans, events] = await Promise.all([

@@ -29,7 +29,7 @@ export async function toggleWatchlist(rawTicker: string): Promise<{ watched: boo
   }
 
   revalidatePath(`/positions/${ticker}`);
-  revalidatePath("/watchlist");
+  revalidatePath("/research");
   return { watched };
 }
 
@@ -43,5 +43,5 @@ export async function removeFromWatchlist(rawTicker: string): Promise<void> {
   });
 
   revalidatePath(`/positions/${ticker}`);
-  revalidatePath("/watchlist");
+  revalidatePath("/research");
 }

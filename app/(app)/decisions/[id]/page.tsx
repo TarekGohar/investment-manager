@@ -60,7 +60,7 @@ export default async function DecisionDetailPage({
     <>
       <Topbar title={action ? "Decision detail" : "Notification detail"} />
       <div className="px-4 pb-12 pt-6 md:px-6 lg:px-[34px] lg:pt-[30px] lg:pb-[60px]">
-        <Link href="/alerts" className="mb-4 inline-block text-xs text-muted hover:text-text">
+        <Link href="/decisions" className="mb-4 inline-block text-xs text-muted hover:text-text">
           ← Back to inbox
         </Link>
 
@@ -201,7 +201,7 @@ export default async function DecisionDetailPage({
                   {priorOnTicker.map((r) => (
                     <li key={r.eventId} className="text-xs">
                       <Link
-                        href={`/alerts/${r.eventId}`}
+                        href={`/decisions/${r.eventId}`}
                         className="block rounded-[6px] bg-bg/30 px-2 py-1.5 hover:bg-bg/60"
                       >
                         <div className="flex items-center justify-between gap-2 text-muted">

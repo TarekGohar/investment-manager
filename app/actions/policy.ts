@@ -50,7 +50,7 @@ export async function saveInvestmentPolicyAction(
   }
 
   await upsertInvestmentPolicy(session.user.id, data);
-  revalidatePath("/policy");
+  revalidatePath("/review");
   return { ok: true };
 }
 
@@ -63,7 +63,7 @@ export async function saveThesisAction(input: ThesisInput): Promise<ActionResult
   }
   await upsertThesis(session.user.id, input);
   revalidatePath(`/positions/${input.ticker.toUpperCase()}`);
-  revalidatePath("/policy");
+  revalidatePath("/review");
   return { ok: true };
 }
 
@@ -73,7 +73,7 @@ export async function deleteThesisAction(ticker: string): Promise<ActionResult> 
 
   await deleteThesis(session.user.id, ticker);
   revalidatePath(`/positions/${ticker.toUpperCase()}`);
-  revalidatePath("/policy");
+  revalidatePath("/review");
   return { ok: true };
 }
 
@@ -86,7 +86,7 @@ export async function reviewThesisAction(
   const body = await reviewThesis(session.user.id, ticker);
   if (!body) return { ok: false, error: "AI review failed." };
   revalidatePath(`/positions/${ticker.toUpperCase()}`);
-  revalidatePath("/policy");
+  revalidatePath("/review");
   return { ok: true, body };
 }
 
@@ -110,7 +110,7 @@ export async function recordConvictionRatingAction(input: {
   });
   if (result.ok) {
     revalidatePath(`/positions/${input.ticker.toUpperCase()}`);
-    revalidatePath("/policy");
+    revalidatePath("/review");
   }
   return result;
 }

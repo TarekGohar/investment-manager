@@ -16,7 +16,7 @@ export async function generateAnnualReviewAction(args: { year: number }): Promis
   try {
     const id = await generateAnnualReview({ userId: session.user.id, year: args.year });
     if (!id) return { ok: false, error: "No holdings to review yet." };
-    revalidatePath("/annual-review");
+    revalidatePath("/review");
     return { ok: true, id };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : "Review failed." };

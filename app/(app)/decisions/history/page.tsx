@@ -16,7 +16,7 @@ export default async function DecisionHistoryPage() {
     <>
       <Topbar title="Decision history" />
       <div className="px-4 pb-12 pt-6 md:px-6 lg:px-[34px] lg:pt-[30px] lg:pb-[60px]">
-        <Link href="/alerts" className="mb-4 inline-block text-xs text-muted hover:text-text">
+        <Link href="/decisions" className="mb-4 inline-block text-xs text-muted hover:text-text">
           ← Back to inbox
         </Link>
 

@@ -85,6 +85,6 @@ const RULES: RuleSpec[] = [
     }
   }
 
-  console.log("\nAll user-facing alerts now enabled. They'll fire on the next 21:10 UTC cron (or you can hit /alerts → Run now).");
+  console.log("\nAll user-facing alerts now enabled. They'll fire on the next 21:10 UTC cron (or you can hit /decisions → Run now).");
   await prisma.$disconnect();
 })();

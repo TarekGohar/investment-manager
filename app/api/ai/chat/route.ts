@@ -122,7 +122,7 @@ export async function POST(req: Request) {
                   if (parsed?.ok && parsed.decisionId) {
                     send("decision_raised", {
                       decisionId: parsed.decisionId,
-                      url: parsed.url ?? `/alerts/${parsed.decisionId}`,
+                      url: parsed.url ?? `/decisions/${parsed.decisionId}`,
                     });
                   }
                 } catch {

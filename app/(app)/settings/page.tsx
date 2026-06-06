@@ -223,7 +223,7 @@ export default async function SettingsPage() {
           The daily review used to be a fixed cron at 21:15 UTC weekdays — but on an
           unchanged buy-and-hold portfolio it produced near-identical output day after day.
           Pull one when you actually want a snapshot. Local dev never runs crons; use the
-          manual triggers on /alerts and the dashboard.
+          manual triggers on /decisions and the dashboard.
         </p>
       </Section>
 

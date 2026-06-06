@@ -133,7 +133,7 @@ export async function sendAlertDigest({
       : `Portfolio · ${count} alerts fired`;
 
   const lines = events.map((e) => `• ${e.message}`);
-  const text = `${count} alert${count === 1 ? "" : "s"} fired:\n\n${lines.join("\n")}\n\nOpen the app: ${APP_URL}/alerts`;
+  const text = `${count} alert${count === 1 ? "" : "s"} fired:\n\n${lines.join("\n")}\n\nOpen the app: ${APP_URL}/decisions`;
 
   const items = events
     .map((e) => {
@@ -154,7 +154,7 @@ export async function sendAlertDigest({
           <div style="font-size:20px;font-weight:600;color:#0a0b0d;margin-bottom:6px;">Portfolio alerts</div>
           <div style="font-size:13px;color:#8a919e;margin-bottom:24px;">${count} alert${count === 1 ? "" : "s"} fired</div>
           <ul style="list-style:disc;padding-left:18px;margin:0 0 24px 0;">${items}</ul>
-          <a href="${APP_URL}/alerts" style="display:inline-block;background:linear-gradient(90deg,#4a82f7,#6f6cf6);color:#ffffff;font-weight:600;text-decoration:none;padding:12px 22px;border-radius:24px;font-size:14px;">Open alerts</a>
+          <a href="${APP_URL}/decisions" style="display:inline-block;background:linear-gradient(90deg,#4a82f7,#6f6cf6);color:#ffffff;font-weight:600;text-decoration:none;padding:12px 22px;border-radius:24px;font-size:14px;">Open decisions</a>
         </td></tr>
       </table>
     </td></tr>

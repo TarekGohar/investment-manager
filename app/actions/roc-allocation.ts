@@ -22,7 +22,7 @@ export async function saveRoCAllocationAction(
   if (!session) redirect("/sign-in");
   try {
     await upsertRoCAllocation(session.user.id, input);
-    revalidatePath("/tax");
+    revalidatePath("/review");
     return { ok: true };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : "Save failed." };
@@ -34,7 +34,7 @@ export async function deleteRoCAllocationAction(id: string): Promise<Result> {
   if (!session) redirect("/sign-in");
   try {
     await deleteRoCAllocation(session.user.id, id);
-    revalidatePath("/tax");
+    revalidatePath("/review");
     return { ok: true };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : "Delete failed." };
@@ -49,7 +49,7 @@ export async function applyRoCAllocationAction(args: {
   if (!session) redirect("/sign-in");
   try {
     const result = await reclassifyDividendsForYear(session.user.id, args.ticker, args.year);
-    revalidatePath("/tax");
+    revalidatePath("/review");
     revalidatePath("/portfolio");
     revalidatePath("/transactions");
     revalidatePath(`/positions/${args.ticker.toUpperCase()}`);

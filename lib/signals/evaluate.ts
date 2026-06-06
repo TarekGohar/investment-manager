@@ -247,7 +247,7 @@ async function runCoachingPass(userId: string): Promise<FiredEvent[]> {
 
 /**
  * Find-or-create the per-user system alert that anchors AlertEvents for a
- * given coaching rule. Users see these in /alerts (so they can disable the
+ * given coaching rule. Users see these in /decisions (so they can disable the
  * email channel) but can't configure params — the platform owns the logic.
  */
 async function ensureSystemAlert(userId: string, rule: AlertRule) {

@@ -114,7 +114,7 @@ export function buildReviewProposeTool(args: {
           reviewEvent: typeof args.reviewEvent === "string" ? args.reviewEvent : null,
           reviewByDate: reviewByDate && !isNaN(reviewByDate.getTime()) ? reviewByDate : null,
         });
-        return { ok: true, decisionId: event.id, url: `/alerts/${event.id}` };
+        return { ok: true, decisionId: event.id, url: `/decisions/${event.id}` };
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Failed to record decision.";
         return { ok: false, error: msg };

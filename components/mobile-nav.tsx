@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { LogoMark, MenuIcon, XIcon } from "@/components/icons";
-import { NAV, SETTINGS_NAV, isNavActive } from "@/components/nav-items";
+import { NAV_SECTIONS, SETTINGS_NAV, isNavActive } from "@/components/nav-items";
 
 export function MobileNav() {
   const pathname = usePathname();
@@ -73,24 +73,33 @@ export function MobileNav() {
               </button>
             </div>
 
-            <nav className="flex flex-1 flex-col gap-1">
-              {NAV.map((item) => {
-                const active = isNavActive(pathname, item);
-                const Icon = item.icon;
-                return (
-                  <Link
-                    key={item.href}
-                    href={item.href}
-                    onClick={() => setOpen(false)}
-                    className={`flex items-center gap-4 rounded-[10px] px-3 py-[11px] text-[15px] font-semibold transition-colors ${
-                      active ? "bg-panel text-text" : "text-text hover:bg-panel"
-                    }`}
-                  >
-                    <Icon className="h-[22px] w-[22px] shrink-0" />
-                    {item.label}
-                  </Link>
-                );
-              })}
+            <nav className="flex flex-1 flex-col gap-[18px] overflow-y-auto">
+              {NAV_SECTIONS.map((section, i) => (
+                <div key={section.label ?? `s${i}`} className="flex flex-col gap-1">
+                  {section.label ? (
+                    <div className="px-3 pb-1 text-[11px] font-semibold uppercase tracking-wider text-muted-2">
+                      {section.label}
+                    </div>
+                  ) : null}
+                  {section.items.map((item) => {
+                    const active = isNavActive(pathname, item);
+                    const Icon = item.icon;
+                    return (
+                      <Link
+                        key={item.href}
+                        href={item.href}
+                        onClick={() => setOpen(false)}
+                        className={`flex items-center gap-4 rounded-[10px] px-3 py-[11px] text-[15px] font-semibold transition-colors ${
+                          active ? "bg-panel text-text" : "text-text hover:bg-panel"
+                        }`}
+                      >
+                        <Icon className="h-[22px] w-[22px] shrink-0" />
+                        {item.label}
+                      </Link>
+                    );
+                  })}
+                </div>
+              ))}
             </nav>
 
             <Link

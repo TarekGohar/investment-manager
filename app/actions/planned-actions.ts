@@ -98,7 +98,7 @@ export async function markIntentAction(args: {
   });
 
   revalidatePath("/");
-  revalidatePath("/alerts");
+  revalidatePath("/decisions");
   if (event.ticker) revalidatePath(`/positions/${event.ticker}`);
 
   return { ok: true, data: { plannedActionId: plan.id } };
@@ -122,7 +122,7 @@ export async function dismissAlertAction(alertEventId: string): Promise<Result> 
   });
 
   revalidatePath("/");
-  revalidatePath("/alerts");
+  revalidatePath("/decisions");
   if (event.ticker) revalidatePath(`/positions/${event.ticker}`);
 
   return { ok: true };
@@ -148,7 +148,7 @@ export async function dismissPlannedActionAction(
   });
 
   revalidatePath("/");
-  revalidatePath("/alerts");
+  revalidatePath("/decisions");
   if (plan.ticker) revalidatePath(`/positions/${plan.ticker}`);
 
   return { ok: true };

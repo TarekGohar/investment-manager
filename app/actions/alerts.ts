@@ -78,7 +78,7 @@ const Schema = z
   });
 
 function refresh() {
-  revalidatePath("/alerts");
+  revalidatePath("/decisions");
   revalidatePath("/", "layout");
 }
 
