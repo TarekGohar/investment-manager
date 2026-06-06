@@ -51,7 +51,7 @@ export async function applyRoCAllocationAction(args: {
     const result = await reclassifyDividendsForYear(session.user.id, args.ticker, args.year);
     revalidatePath("/review");
     revalidatePath("/portfolio");
-    revalidatePath("/transactions");
+    revalidatePath("/portfolio");
     revalidatePath(`/positions/${args.ticker.toUpperCase()}`);
     return { ok: true, data: result };
   } catch (err) {

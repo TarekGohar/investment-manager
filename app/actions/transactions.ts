@@ -13,7 +13,7 @@ import { fulfillPlanIfMatchedAction } from "@/app/actions/planned-actions";
 function refreshTransactionPaths(ticker: string | null) {
   revalidatePath("/");
   revalidatePath("/portfolio");
-  revalidatePath("/transactions");
+  revalidatePath("/portfolio");
   if (ticker) revalidatePath(`/positions/${ticker}`);
 }
 

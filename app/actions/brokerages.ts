@@ -21,7 +21,7 @@ type ActionResult = { ok: true } | { ok: false; error: string };
 
 function refresh() {
   revalidatePath("/settings");
-  revalidatePath("/transactions");
+  revalidatePath("/portfolio");
   revalidatePath("/");
   revalidatePath("/portfolio");
 }

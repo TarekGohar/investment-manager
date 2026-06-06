@@ -20,13 +20,55 @@ import { PortfolioByAccount } from "@/components/portfolio-by-account";
 import { NetWorthCard } from "@/components/net-worth-card";
 import { Tabs, type Tab } from "@/components/tabs";
 import { Term } from "@/components/term";
+import {
+  TransactionsSection,
+  type TransactionFormKind,
+} from "@/components/sections/transactions-section";
 import { getFxRateToCad } from "@/lib/marketdata/fx";
 import { prisma } from "@/lib/prisma";
 import { formatCurrency, formatPercent, formatQty, formatSignedCurrency } from "@/lib/format";
 
-export default async function PortfolioPage() {
+const VALID_TX_KINDS = new Set<TransactionFormKind>([
+  "BUY",
+  "SELL",
+  "DIVIDEND",
+  "SPLIT",
+  "DEPOSIT",
+  "WITHDRAWAL",
+  "TRANSFER_IN",
+  "TRANSFER_OUT",
+]);
+
+type SearchParams = Promise<{
+  tab?: string;
+  ticker?: string;
+  brokerageId?: string;
+  kind?: string;
+  quantity?: string;
+}>;
+
+export default async function PortfolioPage({
+  searchParams,
+}: {
+  searchParams: SearchParams;
+}) {
   const session = await auth.api.getSession({ headers: await headers() });
   if (!session) redirect("/sign-in");
+
+  const params = await searchParams;
+  const txDefaultTicker = params.ticker?.toUpperCase();
+  const txDefaultBrokerageId = params.brokerageId;
+  const txDefaultKind =
+    params.kind && VALID_TX_KINDS.has(params.kind as TransactionFormKind)
+      ? (params.kind as TransactionFormKind)
+      : undefined;
+  const txDefaultQuantity =
+    params.quantity && Number.isFinite(Number(params.quantity))
+      ? Number(params.quantity)
+      : undefined;
+  const hasTxPrefill = Boolean(
+    txDefaultTicker || txDefaultBrokerageId || txDefaultKind || txDefaultQuantity,
+  );
 
   const portfolio = await getEnrichedPortfolio(session.user.id);
   const [locationOverview, correlation, cashBalances, missingPositions, brokerages] = await Promise.all([
@@ -102,13 +144,23 @@ export default async function PortfolioPage() {
             </p>
             {missingPositions.length === 0 ? (
               <Link
-                href="/transactions"
+                href="/portfolio?tab=transactions"
                 className="mt-6 inline-flex items-center gap-2 rounded-[28px] bg-gradient-to-r from-brand to-brand-3 px-6 py-3 text-sm font-semibold text-white transition-[filter] hover:brightness-110"
               >
                 <PlusIcon className="h-4 w-4" />
                 Record transaction
               </Link>
             ) : null}
+          </div>
+
+          <div className="mt-12">
+            <TransactionsSection
+              userId={session.user.id}
+              defaultTicker={txDefaultTicker}
+              defaultBrokerageId={txDefaultBrokerageId}
+              defaultKind={txDefaultKind}
+              defaultQuantity={txDefaultQuantity}
+            />
           </div>
         </div>
       </>
@@ -282,17 +334,31 @@ export default async function PortfolioPage() {
     </>
   );
 
+  const transactionsTab = (
+    <TransactionsSection
+      userId={session.user.id}
+      defaultTicker={txDefaultTicker}
+      defaultBrokerageId={txDefaultBrokerageId}
+      defaultKind={txDefaultKind}
+      defaultQuantity={txDefaultQuantity}
+    />
+  );
+
   const tabs: Tab[] = [
     { key: "Overview", content: overviewTab },
     { key: "Positions", content: positionsTab },
     { key: "Cash & income", content: incomeAndCashTab },
+    { key: "Transactions", content: transactionsTab },
   ];
+
+  const defaultTab =
+    params.tab === "transactions" || hasTxPrefill ? "Transactions" : undefined;
 
   return (
     <>
       <Topbar title="Portfolio" />
       <div className="px-4 pb-12 pt-6 md:px-6 lg:px-[34px] lg:pt-[30px] lg:pb-[60px]">
-        <Tabs tabs={tabs} />
+        <Tabs tabs={tabs} defaultTab={defaultTab} />
       </div>
     </>
   );

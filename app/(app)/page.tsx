@@ -309,7 +309,7 @@ export default async function DashboardPage() {
               Log a buy, sell, dividend, or split. Holdings and P&amp;L update instantly.
             </p>
             <Link
-              href="/transactions"
+              href="/portfolio?tab=transactions"
               className="flex w-full items-center justify-center gap-2 rounded-[28px] bg-gradient-to-r from-brand to-brand-3 py-[15px] text-[15px] font-semibold text-white transition-[filter] hover:brightness-110"
             >
               <PlusIcon className="h-5 w-5" />
@@ -357,7 +357,7 @@ function EmptyDashboard() {
         and dividends from the ledger. Live prices light up the moment you add a position.
       </p>
       <Link
-        href="/transactions"
+        href="/portfolio?tab=transactions"
         className="mt-8 inline-flex items-center gap-2 rounded-[28px] bg-gradient-to-r from-brand to-brand-3 px-7 py-[14px] text-[15px] font-semibold text-white transition-[filter] hover:brightness-110"
       >
         <PlusIcon className="h-5 w-5" />

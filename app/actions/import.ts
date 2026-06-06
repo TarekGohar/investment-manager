@@ -238,7 +238,7 @@ export async function commitImportAction(
 
     revalidatePath("/");
     revalidatePath("/portfolio");
-    revalidatePath("/transactions");
+    revalidatePath("/portfolio");
     revalidatePath("/settings");
     revalidatePath("/settings/import");
 
@@ -286,7 +286,7 @@ export async function rollbackImportAction(
 
   revalidatePath("/");
   revalidatePath("/portfolio");
-  revalidatePath("/transactions");
+  revalidatePath("/portfolio");
   revalidatePath("/settings");
   revalidatePath("/settings/import");
 

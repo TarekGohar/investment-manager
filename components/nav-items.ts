@@ -6,7 +6,6 @@ import {
   MarketsIcon,
   PortfolioIcon,
   SettingsIcon,
-  TransactionsIcon,
 } from "@/components/icons";
 
 export type NavItem = {
@@ -32,7 +31,6 @@ export const NAV_SECTIONS: NavSection[] = [
         icon: PortfolioIcon,
         matchPrefixes: ["/portfolio", "/positions"],
       },
-      { label: "Transactions", href: "/transactions", icon: TransactionsIcon },
       { label: "Research", href: "/research", icon: MarketsIcon },
       { label: "Review", href: "/review", icon: PortfolioIcon },
       { label: "Speak to PM", href: "/chat", icon: ChatIcon },
