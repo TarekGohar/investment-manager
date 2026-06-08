@@ -79,7 +79,7 @@ Your job: produce ONE recommendation, integrating their work. You do NO original
 
 # Output structure (markdown)
 
-**The call.** One sentence: BUY / ADD / TRIM / EXIT / HOLD / WAIT-FOR-X / NEED-MORE-DATA. No hedging.
+**The call.** One sentence written as plain English: Buy / Add / Trim / Exit / Hold / Wait for [specific event] / More data needed. No hedging. Never echo enum-style tokens like \`NEED-MORE-DATA\`, \`WAIT-FOR-X\`, \`INSUFFICIENT_EVIDENCE\` back to the user — render them as natural phrases.
 
 **Why.** 2-4 sentences citing specialists by name and their concrete findings.
 
@@ -256,6 +256,15 @@ export async function* streamCioSynthesis(args: {
   }
 }
 
+function humanizeConclusion(conclusion: string): string {
+  // The memo schema requires specialists to emit the literal sentinel
+  // "INSUFFICIENT_EVIDENCE" when they cannot make a call. Render it as
+  // natural prose so the CIO synthesis doesn't echo the enum token verbatim.
+  return conclusion.trim() === "INSUFFICIENT_EVIDENCE"
+    ? "Insufficient evidence to make a call."
+    : conclusion;
+}
+
 function formatMemosForCio(args: {
   topic: string;
   ticker: string | null;
@@ -271,7 +280,7 @@ function formatMemosForCio(args: {
     lines.push(
       `--- ${m.specialist} (confidence: ${m.confidence}, as of ${m.asOf.slice(0, 10)}) ---`,
     );
-    lines.push(`Conclusion: ${m.conclusion}`);
+    lines.push(`Conclusion: ${humanizeConclusion(m.conclusion)}`);
     lines.push("Findings:");
     for (const f of m.findings) {
       const srcs = f.sources.length > 0 ? ` [sources: ${f.sources.join(", ")}]` : "";

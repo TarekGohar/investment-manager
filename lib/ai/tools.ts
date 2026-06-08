@@ -29,6 +29,7 @@ import { listTheses } from "@/lib/policy/thesis";
 import { getBehavioralPatternsWithPolicy } from "@/lib/behavioral/patterns";
 import { getCashBalances, summarizeCash } from "@/lib/portfolio/cash";
 import { getFilingsForTicker, getInsiderActivity } from "@/lib/filings";
+import { fetchFilingText as fetchEdgarFilingText } from "@/lib/filings/edgar";
 import { tmxGetQuote, tmxGetNews } from "@/lib/marketdata/tmx";
 import {
   cisionDeriveSlug,
@@ -617,7 +618,7 @@ export function buildTools(
     {
       name: "read_pdf",
       description:
-        "Fetch a PDF URL and return its extracted text — for Canadian filings (CSE-listed issuers, SEDAR+ URLs the user has linked), annual reports, MD&As, or any other PDF the user points at. Text is condensed for token efficiency (whitespace collapsed, page-number noise stripped, repeating header/footer lines deduped). Returns `pageCount`, `sourceChars` (length BEFORE truncation), and `truncated` (true if cut at the 36k-char cap — large annual reports will hit this; call again with a narrower URL like a specific filing exhibit when relevant). Returns an error when the URL doesn't resolve to a PDF.",
+        "Fetch a PDF URL and return its extracted text — for Canadian filings (CSE-listed issuers, SEDAR+ URLs the user has linked), annual reports, MD&As, or any other PDF the user points at. Text is condensed for token efficiency (whitespace collapsed, page-number noise stripped, repeating header/footer lines deduped). Returns `pageCount`, `sourceChars` (length BEFORE truncation), and `truncated` (true if cut at the 36k-char cap — large annual reports will hit this; call again with a narrower URL like a specific filing exhibit when relevant). Returns an error when the URL doesn't resolve to a PDF. **For SEC EDGAR filings (sec.gov URLs), use `read_edgar_filing` instead — EDGAR primary docs are HTML, not PDF.**",
       parameters: {
         type: "object",
         properties: { url: { type: "string" } },
@@ -627,9 +628,47 @@ export function buildTools(
       execute: async (input) => {
         const url = String(getProp(input, "url") ?? "");
         if (!url) return { error: "Missing url." };
+        if (/sec\.gov\/Archives\/edgar\//i.test(url)) {
+          return {
+            error:
+              "This is a SEC EDGAR URL. Use the read_edgar_filing tool instead — EDGAR primary documents are HTML, not PDF.",
+          };
+        }
         const result = await fetchPdfText(url);
         if (!result) return { error: `Couldn't fetch or parse PDF at ${url}.` };
         return result;
+      },
+    },
+
+    {
+      name: "read_edgar_filing",
+      description:
+        "Fetch a SEC EDGAR primary-document URL (10-K, 10-Q, 8-K, 40-F, 6-K, 20-F) and return the cleaned plain-text body. EDGAR filings are HTML, not PDF — this is the right tool for any sec.gov URL returned by `get_all_filings`. Inline-XBRL preamble is auto-skipped; text is truncated at ~240k chars. Returns `sourceChars` (post-strip length) and `truncated`. Use this when `get_latest_filing_analysis` returned no indexed analysis but `filings` listed an EDGAR entry you want to read directly.",
+      parameters: {
+        type: "object",
+        properties: { url: { type: "string" } },
+        required: ["url"],
+        additionalProperties: false,
+      },
+      execute: async (input) => {
+        const url = String(getProp(input, "url") ?? "");
+        if (!url) return { error: "Missing url." };
+        if (!/sec\.gov\//i.test(url)) {
+          return {
+            error:
+              "read_edgar_filing only accepts sec.gov URLs. For PDFs use read_pdf; for Cision press releases use read_press_release.",
+          };
+        }
+        try {
+          const text = await fetchEdgarFilingText(url, { maxChars: 240_000 });
+          if (!text.trim()) return { error: `Empty filing body at ${url}.` };
+          const sourceChars = text.length;
+          const truncated = sourceChars >= 240_000;
+          return { url, sourceChars, truncated, text };
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : "Unknown EDGAR fetch error.";
+          return { error: `Couldn't fetch EDGAR filing at ${url}. ${msg}` };
+        }
       },
     },
 
@@ -658,7 +697,7 @@ export function buildTools(
     {
       name: "get_latest_filing_analysis",
       description:
-        "Most recent AI quarterly read (10-Q / 10-K / 40-F / 6-K) for a ticker, plus the indexed filing history. Use this to ground commentary on what actually happened in the most recent print. Returns `analysisAgeDays` and `filingAgeDays` so you can judge staleness — if either exceeds 60, follow up with `get_news` / `get_press_releases` to bridge the gap. Returns null `analysis` when no quarterly read has been generated yet — in that case do not fabricate one; list which filings exist in the index instead.",
+        "Most recent AI quarterly read (10-Q / 10-K / 40-F / 6-K) for a ticker, plus the filing history. Use this to ground commentary on what actually happened in the most recent print. Returns `analysisAgeDays` and `filingAgeDays` so you can judge staleness — if either exceeds 60, follow up with `get_news` / `get_press_releases` to bridge the gap. Returns null `analysis` when no quarterly read has been generated yet (expected for tickers the user does not hold). When the local index is empty, the `filings` array is populated live from EDGAR/CSE/TMX and `indexedLocally` is set to false — in that case do NOT say 'no filings exist'; the filings are real, just not yet summarized. To read one, call `get_all_filings` for full metadata and then `read_edgar_filing` (US HTML) or `read_pdf` (Canadian PDF).",
       parameters: {
         type: "object",
         properties: { ticker: { type: "string" } },
@@ -668,7 +707,7 @@ export function buildTools(
       execute: async (input) => {
         const ticker = String(getProp(input, "ticker") ?? "").toUpperCase();
         if (!ticker) return { error: "Missing ticker." };
-        const [analysis, filings] = await Promise.all([
+        const [analysis, indexedFilings] = await Promise.all([
           getLatestQuarterlyAnalysis(userId, ticker),
           prisma.filing.findMany({
             where: { ticker },
@@ -686,6 +725,46 @@ export function buildTools(
         ]);
         const now = Date.now();
         const dayMs = 86_400_000;
+
+        // When nothing is indexed locally, fall back to live sources so the
+        // caller sees the real filings instead of an empty array. The local
+        // Filing table only gets populated for tickers the user holds or
+        // watches; for any other ticker the index is empty by design.
+        let filingsOut: Array<{
+          id: string | null;
+          type: string;
+          source: string;
+          title: string | null;
+          url: string | null;
+          filedAt: string;
+          ageDays: number;
+        }>;
+        let indexedLocally: boolean;
+        if (indexedFilings.length === 0) {
+          const live = await getFilingsForTicker(ticker, { sinceDays: 365 });
+          indexedLocally = false;
+          filingsOut = live.slice(0, 10).map((f) => ({
+            id: null,
+            type: f.type,
+            source: f.source,
+            title: f.title,
+            url: f.url,
+            filedAt: f.filedAt.toISOString(),
+            ageDays: Math.floor((now - f.filedAt.getTime()) / dayMs),
+          }));
+        } else {
+          indexedLocally = true;
+          filingsOut = indexedFilings.map((f) => ({
+            id: f.id,
+            type: f.type,
+            source: f.source,
+            title: f.title,
+            url: f.url,
+            filedAt: f.filedAt.toISOString(),
+            ageDays: Math.floor((now - f.filedAt.getTime()) / dayMs),
+          }));
+        }
+
         return {
           ticker,
           dataAsOf: new Date().toISOString(),
@@ -702,15 +781,8 @@ export function buildTools(
                   : null,
               }
             : null,
-          filings: filings.map((f) => ({
-            id: f.id,
-            type: f.type,
-            source: f.source,
-            title: f.title,
-            url: f.url,
-            filedAt: f.filedAt.toISOString(),
-            ageDays: Math.floor((now - f.filedAt.getTime()) / dayMs),
-          })),
+          indexedLocally,
+          filings: filingsOut,
         };
       },
     },
@@ -814,7 +886,7 @@ export function buildTools(
             targetLow: i.targetLow,
             upsideToMeanPct: upside,
             numberOfAnalysts: i.numberOfAnalysts,
-            recommendationKey: i.recommendationKey,
+            recommendationKey: humanizeRecommendation(i.recommendationKey),
             recommendationMean: i.recommendationMean,
             recommendationTrend: i.recommendationTrend,
             recentActions: i.recentActions.map((a) => ({
@@ -1295,4 +1367,19 @@ function clampInt(value: unknown, fallback: number, min: number, max: number): n
   const n = typeof value === "number" ? value : Number(value);
   if (!Number.isFinite(n)) return fallback;
   return Math.max(min, Math.min(max, Math.floor(n)));
+}
+
+function humanizeRecommendation(key: string | null): string | null {
+  if (!key) return null;
+  const map: Record<string, string> = {
+    strong_buy: "Strong Buy",
+    buy: "Buy",
+    outperform: "Outperform",
+    hold: "Hold",
+    underperform: "Underperform",
+    sell: "Sell",
+    strong_sell: "Strong Sell",
+    none: "None",
+  };
+  return map[key.toLowerCase()] ?? key.replace(/_/g, " ");
 }
