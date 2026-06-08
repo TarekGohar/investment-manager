@@ -1116,23 +1116,30 @@ function PanelProgressCard({
         {specialists.map(([name, s]) => (
           <li
             key={name}
-            className="flex items-center justify-between gap-3 rounded-md bg-panel/40 px-3 py-1.5 text-[13px]"
+            className="rounded-md bg-panel/40 px-3 py-1.5 text-[13px]"
           >
-            <div className="flex items-center gap-2.5">
-              <SpecialistStatusIndicator status={s.status} />
-              <span className={s.status === "running" ? "text-text" : "text-muted"}>
-                {SPECIALIST_LABELS[name] ?? name}
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <SpecialistStatusIndicator status={s.status} />
+                <span className={s.status === "running" ? "text-text" : "text-muted"}>
+                  {SPECIALIST_LABELS[name] ?? name}
+                </span>
+              </div>
+              <span className="tabular-nums text-[11px] text-muted">
+                {s.status === "done" && typeof s.durationMs === "number"
+                  ? formatElapsed(s.durationMs)
+                  : s.status === "error"
+                    ? "error"
+                    : s.status === "running"
+                      ? "running…"
+                      : ""}
               </span>
             </div>
-            <span className="tabular-nums text-[11px] text-muted">
-              {s.status === "done" && typeof s.durationMs === "number"
-                ? formatElapsed(s.durationMs)
-                : s.status === "error"
-                  ? "error"
-                  : s.status === "running"
-                    ? "running…"
-                    : ""}
-            </span>
+            {s.status === "error" && s.error ? (
+              <div className="mt-1 pl-6 text-[11px] leading-snug text-danger/85 break-words">
+                {s.error}
+              </div>
+            ) : null}
           </li>
         ))}
       </ul>
