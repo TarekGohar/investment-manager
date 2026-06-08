@@ -42,7 +42,13 @@ Concentration (any single name > 20% weight), drawdowns vs cost, unusual correla
 2-3 specific things for next week — earnings, macro events, key technical levels. These will be graded by next week's review, so be measurable.
 
 ### Decisions to raise
-You have a \`propose_decision\` tool. Call it ONLY when your review identifies a specific actionable item — a concrete trim, add, harvest, or rebalance leg with rationale and sizing. Do NOT call it for "worth watching" items or general commentary. Each actionable item is one tool call. If nothing in this review needs a tracked decision, don't call it at all — your prose suffices.`;
+You have a \`propose_decision\` tool. Call it ONLY when your review identifies a specific actionable item — a concrete trim, add, harvest, or rebalance leg. Do NOT call it for "worth watching" items or general commentary. Each actionable item is one tool call. If nothing in this review needs a tracked decision, don't call it at all — your prose suffices.
+
+When you do call it, three fields carry the value: WHAT (action + ticker), WHY (one coherent \`rationale\` paragraph — absorbs the thesis reasoning, the falsifier as a clause, and the review trigger as a clause), and DEGREE (numbers only in \`sizingDetails\`: \`targetWeightPct\`, \`currentWeightPct\`, \`expectedSharesDelta\`, \`expectedDollarDelta\` — use the keys that apply).
+
+# Canadian tax rule — non-negotiable
+
+\`HARVEST_LOSS\` is for NON-REGISTERED positions only. In Canada, losses inside TFSA / RRSP / FHSA / RESP / LIRA / RRIF are NOT deductible — selling a losing position in a registered account creates no tax benefit, period. Each holding line in the portfolio snapshot includes an "accounts:" breakdown (e.g. "FHSA 10" or "TFSA 5, NON_REGISTERED 3"). Before proposing \`HARVEST_LOSS\` on a name, verify the accounts string includes \`NON_REGISTERED\`, \`JOINT_NON_REGISTERED\`, or \`CORPORATE\` with non-zero shares. If the position is entirely in registered accounts, you may still recommend \`EXIT\` if there's a portfolio / thesis reason, but the rationale must NOT cite tax savings — there are none.`;
 
 function formatPortfolioSnapshot(p: EnrichedPortfolio): string {
   const lines: string[] = [];
@@ -76,11 +82,22 @@ function formatPortfolioSnapshot(p: EnrichedPortfolio): string {
       h.unrealized != null
         ? `unrealized ${formatSignedCurrency(h.unrealized)} (${formatPercent(h.unrealizedPct ?? 0)})`
         : "no live PnL";
+    // Per-account breakdown so the weekly review can see whether a position
+    // is registered-only (no TLH benefit) before proposing HARVEST_LOSS.
+    const accounts = formatAccountBreakdown(h.byKind);
     lines.push(
-      `- ${h.ticker}: ${h.quantity} sh @ ACB ${formatCurrency(h.acb)} (cost basis ${formatCurrency(h.costBasis)}), now ${live}, ${day}, ${unrealized}, weight ${weight}`,
+      `- ${h.ticker}: ${h.quantity} sh @ ACB ${formatCurrency(h.acb)} (cost basis ${formatCurrency(h.costBasis)}), now ${live}, ${day}, ${unrealized}, weight ${weight}, accounts: ${accounts}`,
     );
   }
   return lines.join("\n");
+}
+
+function formatAccountBreakdown(byKind: EnrichedPortfolio["holdings"][number]["byKind"]): string {
+  const parts: string[] = [];
+  for (const [kind, slice] of Object.entries(byKind)) {
+    if (slice.quantity > 0) parts.push(`${kind} ${slice.quantity}`);
+  }
+  return parts.length > 0 ? parts.join(", ") : "none";
 }
 
 async function generateAnalysis(args: {

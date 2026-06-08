@@ -3,7 +3,9 @@ import { headers } from "next/headers";
 import { auth } from "@/lib/auth";
 import { getModel, getProvider } from "@/lib/ai";
 import { PM_PERSONA } from "@/lib/ai/persona";
-import { buildTools } from "@/lib/ai/tools";
+import { buildCioConversationalTools } from "@/lib/ai/panel/cio";
+import { PrismaSpecialistMemoStore } from "@/lib/ai/panel/persistence";
+import type { EscalationRequest } from "@/lib/ai/panel/types";
 import { clearAborter, registerAborter } from "@/lib/ai/chat-aborters";
 import {
   getOrCreateConversation,
@@ -47,9 +49,9 @@ export async function POST(req: Request) {
   const history = toChatHistory(stored);
   const messages: ChatMessage[] = [...history];
 
-  const tools = buildTools(session.user.id, conversation.id);
   const provider = getProvider();
   const model = getModel("chat");
+  const memoStore = new PrismaSpecialistMemoStore();
 
   const encoder = new TextEncoder();
   const aborter = new AbortController();
@@ -77,6 +79,20 @@ export async function POST(req: Request) {
       };
 
       send("meta", { conversationId: conversation.id, model });
+
+      // The CIO panel tools are built here (rather than above) so the
+      // request_panel handler can push an `escalation_requested` SSE frame
+      // synchronously when the model calls it. The handler captures the
+      // request but does NOT run the panel — the user confirms via
+      // /api/ai/chat/panel/confirm.
+      const tools = buildCioConversationalTools({
+        userId: session.user.id,
+        conversationId: conversation.id,
+        store: memoStore,
+        onEscalationRequested: async (req: EscalationRequest) => {
+          send("escalation_requested", req);
+        },
+      });
 
       let finalText = "";
       let finalToolCalls: ToolCall[] = [];

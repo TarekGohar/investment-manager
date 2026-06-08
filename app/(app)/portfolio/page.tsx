@@ -97,7 +97,7 @@ export default async function PortfolioPage({
   const cashCurrencies = Object.keys(cashSummary.totalsByCurrency);
   const needsUsdToCad =
     cashCurrencies.includes("USD") ||
-    portfolio.holdings.some((h) => h.currency !== "CAD");
+    portfolio.holdings.some((h) => h.listingCurrency !== "CAD");
   const usdToCadRate = needsUsdToCad
     ? ((await getFxRateToCad("USD", new Date()))?.rate ?? null)
     : null;

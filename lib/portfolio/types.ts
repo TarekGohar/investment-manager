@@ -73,12 +73,21 @@ export type Holding = {
   ticker: string;
   /**
    * Display / accounting currency for this holding's cost basis. Captured
-   * from the first share-affecting tx (BUY / TRANSFER_IN). Determines whether
-   * we need to FX-convert the live quote (which always comes back in the
-   * security's home-exchange currency — USD for naked tickers, CAD for
-   * .TO/.V/.NE/.CN).
+   * from the first share-affecting tx (BUY / TRANSFER_IN). This is the
+   * currency that `costBasis`, `marketValue`, dividends, etc. are
+   * denominated in. CRA-relevant: for non-registered ACB this is the
+   * currency the basis is reported in for taxes.
    */
   currency: string;
+  /**
+   * The security's home-exchange currency — USD for naked tickers, CAD for
+   * .TO/.V/.NE/.CN. Distinct from `currency` above for positions whose
+   * accounting was booked in CAD even though the underlying trades in USD
+   * (e.g. a US stock held in a Canadian registered account where the
+   * broker reports CAD-equivalent values). This is the field downstream
+   * FX-exposure code should bucket on.
+   */
+  listingCurrency: string;
   // Totals (used by display + AI summaries)
   quantity: number;
   costBasis: number;

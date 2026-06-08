@@ -32,8 +32,6 @@ export function RaiseDecisionButton({ ticker }: { ticker: string | null }) {
   const [urgency, setUrgency] = useState<DecisionUrgency>("MATERIAL");
   const [message, setMessage] = useState("");
   const [rationale, setRationale] = useState("");
-  const [invalidation, setInvalidation] = useState("");
-  const [reviewEvent, setReviewEvent] = useState("");
   const [reviewByDate, setReviewByDate] = useState("");
 
   function reset() {
@@ -41,8 +39,6 @@ export function RaiseDecisionButton({ ticker }: { ticker: string | null }) {
     setUrgency("MATERIAL");
     setMessage("");
     setRationale("");
-    setInvalidation("");
-    setReviewEvent("");
     setReviewByDate("");
   }
 
@@ -54,8 +50,6 @@ export function RaiseDecisionButton({ ticker }: { ticker: string | null }) {
         urgency,
         message,
         rationale,
-        invalidationTrigger: invalidation || null,
-        reviewEvent: reviewEvent || null,
         reviewByDate: reviewByDate || null,
       });
       if (result.ok) {
@@ -140,45 +134,24 @@ export function RaiseDecisionButton({ ticker }: { ticker: string | null }) {
           />
         </Field>
 
-        <Field label="Rationale (why this, why now — at least 10 chars)">
+        <Field label="Rationale (why now — and include 'I'd reverse this if X' + 'revisit at Y' as clauses if relevant)">
           <textarea
             value={rationale}
             onChange={(e) => setRationale(e.target.value)}
-            rows={3}
-            placeholder="Future-you will read this when the decision comes back up for review."
+            rows={4}
+            placeholder="Future-you will read this when the decision comes back up. One paragraph. Include the why, the falsifier, and the review trigger as natural-language clauses — no separate fields."
             className="w-full rounded-[8px] border border-border bg-panel px-2.5 py-2 text-sm"
           />
         </Field>
 
-        <Field label="What would make this wrong (optional)">
+        <Field label="Review by (optional date for the countdown)">
           <input
-            type="text"
-            value={invalidation}
-            onChange={(e) => setInvalidation(e.target.value)}
-            placeholder="e.g. Cap is raised in IPS before review date."
+            type="date"
+            value={reviewByDate}
+            onChange={(e) => setReviewByDate(e.target.value)}
             className="w-full rounded-[8px] border border-border bg-panel px-2.5 py-1.5 text-sm"
           />
         </Field>
-
-        <div className="grid grid-cols-[2fr_1fr] gap-2">
-          <Field label="Review trigger (optional)">
-            <input
-              type="text"
-              value={reviewEvent}
-              onChange={(e) => setReviewEvent(e.target.value)}
-              placeholder="e.g. Sept 2 earnings"
-              className="w-full rounded-[8px] border border-border bg-panel px-2.5 py-1.5 text-sm"
-            />
-          </Field>
-          <Field label="Review by">
-            <input
-              type="date"
-              value={reviewByDate}
-              onChange={(e) => setReviewByDate(e.target.value)}
-              className="w-full rounded-[8px] border border-border bg-panel px-2.5 py-1.5 text-sm"
-            />
-          </Field>
-        </div>
 
         <button
           type="button"

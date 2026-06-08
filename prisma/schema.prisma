@@ -40,6 +40,7 @@ model User {
   importBatches     ImportBatch[]
   plannedActions    PlannedAction[]
   rocAllocations    RoCAllocation[]
+  specialistMemos   SpecialistMemo[]
 
   @@map("user")
 }
@@ -413,10 +414,14 @@ model Transcript {
   ticker    String
   quarter   String // fiscal quarter, e.g. "2024Q1"
   title     String?
-  /// Speaker-segmented transcript: [{ speaker, title, content, sentiment }]
+  /// Speaker-segmented transcript: [{ speaker, title, content, sentiment }].
+  /// Empty array marks a "negative-cache" miss — Alpha Vantage didn't have
+  /// this quarter when we last asked. Re-checked after `unavailableUntil`.
   segments  Json
   source    String   @default("alphavantage")
   fetchedAt DateTime @default(now())
+  /// Set on miss rows. Skip the upstream API until this passes; null on hits.
+  unavailableUntil DateTime?
 
   @@id([ticker, quarter])
   @@map("transcript")
@@ -569,30 +574,16 @@ model AlertEvent {
   /// What the platform suggests the user do. Null means this is a pure
   /// notification, not a decision; the Hub inbox filters those out.
   recommendedAction RecommendedAction?
-  /// Structured spec of the recommendation: { ticker, quantity?, priceContext?, account? }.
-  actionDetails Json?
-  /// 1-3 sentence WHY in PM voice. Why this name, now.
+  /// ONE coherent reasoning paragraph. Absorbs the why, the falsifier as a
+  /// clause, the review trigger as a clause, and alternatives where relevant.
+  /// No parallel prose fields — keep the narrative in one place.
   rationale String?
-  /// 1-2 sentence WHY *this size* — separate from why this name. Forces
-  /// thinking in NAV terms, not share-count terms.
-  sizingRationale String?
-  /// Structured: { nominalUsd, pctOfNav, maxLossToInvalidationUsd,
-  /// maxLossToInvalidationPctOfNav, postTradePositionPctOfNav,
-  /// postTradeBucketPctOfTarget }. Lets the retrospective compute
-  /// "did sizing match the documented framework?"
+  /// Structured DEGREE numbers: { targetWeightPct, currentWeightPct,
+  /// expectedSharesDelta, expectedDollarDelta }. Use the keys that apply.
+  /// Numbers only — prose explanation belongs in `rationale`.
   sizingDetails Json?
-  /// Snapshot of inputs at firing time (numbers, tool outputs, links).
-  /// Frozen so it doesn't go stale as positions move.
-  supportingEvidence Json?
-  /// What was chosen over what — PM capital-allocation discipline.
-  alternativesConsidered String?
-  /// What would make THIS decision wrong (separate from thesis-level
-  /// invalidation, which lives on the Thesis model).
-  invalidationTrigger String?
-  /// Soft deadline / natural review date.
+  /// Soft deadline / natural review date for the countdown footer.
   reviewByDate DateTime?
-  /// Human-readable review trigger, e.g. "Sept 2 print, criterion (a) clock".
-  reviewEvent String?
   urgency DecisionUrgency @default(INFO)
   /// FK to AIConversation when source=AI_CHAT. SetNull on conversation delete
   /// so the decision history outlives the chat.
@@ -1018,4 +1009,32 @@ model AIAnalysis {
   @@index([userId, kind, generatedAt(sort: Desc)])
   @@index([userId, generatedAt(sort: Desc)])
   @@map("ai_analysis")
+}
+
+// ─── Investment-committee panel ────────────────────────────────────────
+
+/// Specialist memo cache. Each specialist's structured output gets persisted
+/// here so the CIO can recall it on later turns without re-firing the panel.
+/// Memos are versioned by `asOf` — the same (user, specialist, ticker) can
+/// have many rows, and the most recent one is the answer.
+model SpecialistMemo {
+  id         String   @id @default(cuid())
+  userId     String
+  specialist String   // matches SpecialistName ("BUSINESS_ANALYST", etc.)
+  ticker     String
+  conclusion String
+  confidence String   // "low" | "medium" | "high" | "insufficient"
+  modelUsed  String
+  /// Full Memo object (specialist, ticker, asOf, brief, modelUsed,
+  /// toolsConsulted, conclusion, confidence, findings[], steelmanOpposite,
+  /// whatWouldFlipMe[], dataGaps[]). Serialized verbatim.
+  memo       Json
+  asOf       DateTime
+  createdAt  DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, ticker, asOf(sort: Desc)])
+  @@index([userId, specialist, ticker])
+  @@map("specialist_memo")
 }

@@ -634,11 +634,19 @@ export async function getEarningsTranscript(
     ? [normalizeQuarter(quarter)].filter((q): q is string => q != null)
     : recentReportedQuarters(4);
 
+  const now = new Date();
   for (const q of quarters) {
     const cached = await prisma.transcript.findUnique({
       where: { ticker_quarter: { ticker: sym, quarter: q } },
     });
-    if (cached) return deserializeTranscript(cached);
+    if (cached) {
+      const segments = Array.isArray(cached.segments) ? cached.segments : [];
+      // Hit row: cached transcript with content. Return it.
+      if (segments.length > 0) return deserializeTranscript(cached);
+      // Miss row still within its TTL: skip the API, try next quarter.
+      if (cached.unavailableUntil && cached.unavailableUntil > now) continue;
+      // Miss row whose TTL expired: fall through to re-ask Alpha Vantage.
+    }
 
     const fresh = await fetchEarningsTranscript(sym, q);
     if (fresh && fresh.segments.length > 0) {
@@ -650,11 +658,40 @@ export async function getEarningsTranscript(
           title: fresh.title,
           segments: fresh.segments as unknown as Prisma.InputJsonValue,
           source: fresh.source,
+          unavailableUntil: null,
         },
-        update: {}, // immutable — never overwrite a cached transcript
+        update: {
+          // Promote an existing miss row into a hit. Hits themselves stay
+          // immutable — the only field that flips is unavailableUntil → null
+          // and segments → real content.
+          title: fresh.title,
+          segments: fresh.segments as unknown as Prisma.InputJsonValue,
+          source: fresh.source,
+          unavailableUntil: null,
+        },
       });
       return deserializeTranscript(stored);
     }
+
+    // Record (or extend) the miss so the next caller in the next week skips
+    // the upstream request. 7-day TTL is long enough to ride out an Alpha
+    // Vantage indexing delay without preventing eventual catch-up.
+    const ttlMs = 7 * 86_400_000;
+    await prisma.transcript.upsert({
+      where: { ticker_quarter: { ticker: sym, quarter: q } },
+      create: {
+        ticker: sym,
+        quarter: q,
+        title: null,
+        segments: [] as unknown as Prisma.InputJsonValue,
+        source: "alphavantage",
+        unavailableUntil: new Date(now.getTime() + ttlMs),
+      },
+      update: {
+        // Only refresh the TTL — never overwrite a hit's segments.
+        unavailableUntil: new Date(now.getTime() + ttlMs),
+      },
+    });
   }
   return null;
 }

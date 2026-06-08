@@ -18,7 +18,7 @@ export function buildReviewProposeTool(args: {
   return {
     name: "propose_decision",
     description:
-      "Write a decision into the user's Alerts inbox. Use this when your review identifies a specific actionable item: a concrete buy/sell/trim/rebalance/harvest with a rationale, a sizing frame, and an invalidation trigger. Do NOT call this for general commentary or 'worth watching' items — only for things that warrant a tracked decision. Each call writes one Hub entry; you can call this multiple times in a single review when there are multiple actionable items.",
+      "Write a decision into the user's Alerts inbox. Use this when your review identifies a specific actionable item: a concrete buy/sell/trim/rebalance/harvest. Three fields carry value: WHAT (action + ticker), WHY (one coherent `rationale` paragraph that absorbs the thesis reasoning, the falsifier as a clause, and the review trigger as a clause — do NOT split these into separate sections), and DEGREE (numbers only in `sizingDetails`: targetWeightPct, currentWeightPct, expectedSharesDelta, expectedDollarDelta). Do NOT call this for general commentary or 'worth watching' items.",
     parameters: {
       type: "object",
       properties: {
@@ -42,7 +42,7 @@ export function buildReviewProposeTool(args: {
         urgency: {
           type: "string",
           enum: ["INFO", "MATERIAL", "URGENT"],
-          description: "Default MATERIAL for review-raised decisions. URGENT only with real time-decay (TLH window closing, ex-div Monday, earnings within 48h).",
+          description: "MATERIAL by default (implicit baseline). URGENT only with real time-decay (TLH window closing, ex-div Monday, earnings within 48h). INFO for low-priority watch items.",
         },
         message: {
           type: "string",
@@ -50,42 +50,22 @@ export function buildReviewProposeTool(args: {
         },
         rationale: {
           type: "string",
-          description: "1-3 sentences in PM voice — why now, why this name.",
-        },
-        actionDetails: {
-          type: "object",
-          description: "Structured spec: ticker, quantity, priceContext, account.",
-          additionalProperties: true,
-        },
-        sizingRationale: {
-          type: "string",
-          description: "1-2 sentences on why this size, in NAV terms.",
+          description: "ONE coherent paragraph (3-6 sentences). Includes the why, the falsifier as a clause ('I'd reverse this if X'), and the review trigger as a clause ('revisit after the Sept 3 print'). Cite numbers verbatim from the data.",
         },
         sizingDetails: {
           type: "object",
-          description: "nominalUsd / pctOfNav / maxLossToInvalidationUsd / etc.",
+          description: "Structured DEGREE numbers: targetWeightPct, currentWeightPct, expectedSharesDelta (negative for sells), expectedDollarDelta (negative for freed cash). Use the keys that apply.",
+          properties: {
+            targetWeightPct: { type: "number" },
+            currentWeightPct: { type: "number" },
+            expectedSharesDelta: { type: "number" },
+            expectedDollarDelta: { type: "number" },
+          },
           additionalProperties: true,
-        },
-        supportingEvidence: {
-          type: "object",
-          description: "Snapshot of numbers backing this decision (frozen).",
-          additionalProperties: true,
-        },
-        alternativesConsidered: {
-          type: "string",
-          description: "What you chose this over. Required for ADD.",
-        },
-        invalidationTrigger: {
-          type: "string",
-          description: "What would make THIS decision wrong.",
-        },
-        reviewEvent: {
-          type: "string",
-          description: "Human-readable trigger that should bring this back up for review.",
         },
         reviewByDate: {
           type: "string",
-          description: "ISO date YYYY-MM-DD.",
+          description: "ISO date YYYY-MM-DD for the countdown footer.",
         },
       },
       required: ["recommendedAction", "message", "rationale"],
@@ -105,13 +85,7 @@ export function buildReviewProposeTool(args: {
           recommendedAction: args.recommendedAction as Parameters<typeof createDecisionEvent>[0]["recommendedAction"],
           urgency: (typeof args.urgency === "string" ? args.urgency : "MATERIAL") as Parameters<typeof createDecisionEvent>[0]["urgency"],
           rationale: typeof args.rationale === "string" ? args.rationale : null,
-          actionDetails: (args.actionDetails as Record<string, unknown> | undefined) ?? null,
-          sizingRationale: typeof args.sizingRationale === "string" ? args.sizingRationale : null,
           sizingDetails: (args.sizingDetails as Record<string, unknown> | undefined) ?? null,
-          supportingEvidence: (args.supportingEvidence as Record<string, unknown> | undefined) ?? null,
-          alternativesConsidered: typeof args.alternativesConsidered === "string" ? args.alternativesConsidered : null,
-          invalidationTrigger: typeof args.invalidationTrigger === "string" ? args.invalidationTrigger : null,
-          reviewEvent: typeof args.reviewEvent === "string" ? args.reviewEvent : null,
           reviewByDate: reviewByDate && !isNaN(reviewByDate.getTime()) ? reviewByDate : null,
         });
         return { ok: true, decisionId: event.id, url: `/decisions/${event.id}` };

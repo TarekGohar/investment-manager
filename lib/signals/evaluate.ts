@@ -210,11 +210,7 @@ async function runCoachingPass(userId: string): Promise<FiredEvent[]> {
         recommendedAction: e.recommendedAction,
         urgency: e.urgency,
         rationale: e.rationale,
-        actionDetails: e.actionDetails,
-        supportingEvidence: e.supportingEvidence,
-        invalidationTrigger: e.invalidationTrigger,
         reviewByDate: e.reviewByDate,
-        reviewEvent: e.reviewEvent,
       });
       out.push({ alertId: alert.id, userId, ticker: e.ticker, message: e.message, data: e.data });
     }
@@ -232,9 +228,6 @@ async function runCoachingPass(userId: string): Promise<FiredEvent[]> {
         recommendedAction: e.recommendedAction,
         urgency: e.urgency,
         rationale: e.rationale,
-        actionDetails: e.actionDetails,
-        supportingEvidence: e.supportingEvidence,
-        invalidationTrigger: e.invalidationTrigger,
       });
       out.push({ alertId: alert.id, userId, ticker: e.ticker, message: e.message, data: e.data });
     }

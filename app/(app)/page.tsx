@@ -77,7 +77,7 @@ export default async function DashboardPage() {
   const series = investedCapitalSeries([...transactions].reverse());
 
   // Session 6 forecasting cards — one shared FX fetch covers all three.
-  const hasNonCadHolding = portfolio.holdings.some((h) => h.currency !== "CAD");
+  const hasNonCadHolding = portfolio.holdings.some((h) => h.listingCurrency !== "CAD");
   const hasNonCadCash = Object.keys(cashSummary.totalsByCurrency).some(
     (c) => c !== "CAD",
   );

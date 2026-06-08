@@ -284,6 +284,7 @@ function translateRow(
 
   const occurredAt = parseRbcDate(raw["Date"]);
   const currency = raw["Currency"].toUpperCase() || "CAD";
+  const ticker = normalizeTicker(raw["Symbol"].toUpperCase() || null, currency);
 
   switch (activity) {
     case "Buy":
@@ -327,7 +328,7 @@ function translateRow(
         value: {
           sourceLine,
           kind: activity === "Buy" ? "BUY" : "SELL",
-          ticker: raw["Symbol"].toUpperCase() || null,
+          ticker,
           currency,
           quantity: qty,
           price,
@@ -342,7 +343,6 @@ function translateRow(
     case "Dividends": {
       const value = parseNumber(raw["Value"]);
       if (value == null) throw new Error("Dividend row missing Value");
-      const ticker = raw["Symbol"].toUpperCase() || null;
       // Classify by issuer, not by withholding hint. The NON-RES note can
       // be absent on foreign dividends inside an RRSP (US-Canada treaty
       // waives WHT) — so a hint-based heuristic mis-classifies US-paid
@@ -501,4 +501,21 @@ function classifyDividendByTicker(ticker: string | null): DividendType {
   if (/\.(TO|V|NE|CN)$/.test(t)) return "ELIGIBLE";
   if (KNOWN_CANADIAN_NAKED_TICKERS.has(t)) return "ELIGIBLE";
   return "FOREIGN";
+}
+
+/**
+ * RBC reports Canadian large-caps as naked tickers ("RY" instead of "RY.TO")
+ * even though the user holds the TSX listing. Downstream `quoteCurrencyForTicker`
+ * treats anything without `.TO/.V/.NE/.CN` as USD-listed and routes quotes
+ * to the wrong provider. Normalize at import time: if the row's currency is
+ * CAD AND the symbol is in our known-Canadian list AND has no exchange
+ * suffix, append `.TO`. The currency check guards against the (rare) case
+ * where RBC reports a true US-side trade of a cross-listed name.
+ */
+function normalizeTicker(ticker: string | null, currency: string): string | null {
+  if (!ticker) return null;
+  if (currency !== "CAD") return ticker;
+  if (/\.(TO|V|NE|CN)$/.test(ticker)) return ticker;
+  if (KNOWN_CANADIAN_NAKED_TICKERS.has(ticker)) return `${ticker}.TO`;
+  return ticker;
 }

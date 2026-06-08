@@ -25,6 +25,7 @@ export class OpenAiCompatibleProvider implements AiProvider {
     messages,
     tools = [],
     maxToolRounds = DEFAULT_TOOL_ROUNDS,
+    maxTokens,
     signal,
   }: StreamChatParams): AsyncGenerator<StreamEvent> {
     const oaiMessages = toOpenAiMessages(system, messages);
@@ -47,10 +48,12 @@ export class OpenAiCompatibleProvider implements AiProvider {
           // Temperature 0.6 strikes a balance: PM-grade calls still have
           // variety, but at the default 1.0 gpt-4o occasionally produces
           // garbage tokens (CJK chars mid-English-sentence) when the
-          // context includes structured data + tool results. Capping
-          // max_tokens prevents runaway generation if it does happen.
+          // context includes structured data + tool results. Capping the
+          // completion length prevents runaway generation if it does
+          // happen. `max_completion_tokens` is the OpenAI-blessed param
+          // since the o1 era — gpt-5+ rejects the legacy `max_tokens`.
           temperature: 0.6,
-          max_tokens: 2000,
+          max_completion_tokens: maxTokens ?? 2000,
         },
         signal ? { signal } : undefined,
       );

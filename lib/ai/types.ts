@@ -77,6 +77,12 @@ export type StreamChatParams = {
   /** Cap to prevent runaway tool loops. */
   maxToolRounds?: number;
   /**
+   * Per-response max-output-tokens override. Default is provider-specific
+   * (4096 on Anthropic). Bump when the model is expected to produce long
+   * structured output (e.g. specialist memos with detailed [CALC] reasoning).
+   */
+  maxTokens?: number;
+  /**
    * Aborts the upstream request when the consumer cancels the stream. The
    * provider should pass this to the SDK and bail out of the for-await loop.
    */

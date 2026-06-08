@@ -94,8 +94,6 @@ export async function raiseManualDecisionAction(input: {
   urgency: DecisionUrgency;
   message: string;
   rationale: string;
-  invalidationTrigger?: string | null;
-  reviewEvent?: string | null;
   reviewByDate?: string | null;
 }): Promise<{ ok: true; eventId: string } | { ok: false; error: string }> {
   const session = await auth.api.getSession({ headers: await headers() });
@@ -122,8 +120,6 @@ export async function raiseManualDecisionAction(input: {
       rationale,
       recommendedAction: input.recommendedAction,
       urgency: input.urgency,
-      invalidationTrigger: input.invalidationTrigger?.trim() || null,
-      reviewEvent: input.reviewEvent?.trim() || null,
       reviewByDate,
     });
     revalidatePath("/decisions");

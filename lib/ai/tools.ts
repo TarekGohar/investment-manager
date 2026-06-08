@@ -35,6 +35,7 @@ import {
   cisionListReleases,
   cisionFetchReleaseBody,
 } from "@/lib/marketdata/cision";
+import { fetchPdfText } from "@/lib/marketdata/pdf";
 import { prisma } from "@/lib/prisma";
 import { listTransactions } from "@/lib/portfolio/queries";
 import { getUserPreferences } from "@/lib/preferences";
@@ -54,7 +55,7 @@ export function buildTools(
   userId: string,
   conversationId?: string,
 ): ToolDefinition[] {
-  return [
+  const tools: ToolDefinition[] = [
     {
       name: "get_quote",
       description:
@@ -165,17 +166,26 @@ export function buildTools(
     {
       name: "get_my_portfolio",
       description:
-        "The user's entire portfolio derived from their transaction ledger. Returns each holding with shares, avg cost, cost basis (native + CAD), ACB for the non-reg pool, realized gain, dividends received, foreign tax withheld, per-account-kind breakdown (TFSA/RRSP/non-reg/etc.), market value, day change, unrealized P&L, plus totals across the book.",
+        "The user's entire portfolio derived from their transaction ledger. Returns each holding with shares, avg cost, cost basis (native + CAD), ACB for the non-reg pool, realized gain, dividends received, foreign tax withheld, per-account-kind breakdown (TFSA/RRSP/non-reg/etc.), market value, day change, unrealized P&L, AND **`weightOfNavPct`** — the position's current weight as a percentage of the total portfolio market value (CAD). Use `weightOfNavPct` directly when asked about single-name concentration; do NOT recompute it from raw market values and claim you can't compute weight. Each holding has TWO currency fields: `currency` is the accounting currency (what marketValue/costBasis are denominated in — often CAD for positions held in Canadian registered accounts even when the stock is US-listed), and `listingCurrency` is the stock's home-exchange currency (USD for naked tickers, CAD for .TO/.V/.NE/.CN). Use `listingCurrency` for FX-exposure reasoning; use `currency` only as a unit label on the value fields.",
       parameters: { type: "object", properties: {}, additionalProperties: false },
       execute: async () => {
-        return await getEnrichedPortfolio(userId);
+        const portfolio = await getEnrichedPortfolio(userId);
+        const total = portfolio.totalMarketValue;
+        const holdings = portfolio.holdings.map((h) => ({
+          ...h,
+          weightOfNavPct:
+            total > 0 && h.marketValueCad != null
+              ? (h.marketValueCad / total) * 100
+              : null,
+        }));
+        return { ...portfolio, holdings };
       },
     },
 
     {
       name: "get_my_position",
       description:
-        "A single position the user holds: shares, avg cost, cost basis, realized gain, dividends received, holding period. Returns an error if the user does not hold this ticker.",
+        "A single position the user holds: shares, avg cost, cost basis, realized gain, dividends received, holding period, plus **`weightOfNavPct`** — the position's current weight as a percentage of the total portfolio market value (CAD). Use this field directly for single-name concentration; do not refuse to compute weight when this tool provides it. Returns an error if the user does not hold this ticker.",
       parameters: {
         type: "object",
         properties: { ticker: { type: "string" } },
@@ -185,9 +195,20 @@ export function buildTools(
       execute: async (input) => {
         const ticker = String(getProp(input, "ticker") ?? "").toUpperCase();
         if (!ticker) return { error: "Missing ticker." };
-        const h = await getHolding(userId, ticker);
-        if (!h) return { error: `You don't currently hold ${ticker}.` };
-        return h;
+        const portfolio = await getEnrichedPortfolio(userId);
+        const h = portfolio.holdings.find((row) => row.ticker === ticker);
+        if (!h) {
+          // Fall back to getHolding for the error path (consistent with the
+          // prior behaviour for tickers not in the enriched portfolio).
+          const single = await getHolding(userId, ticker);
+          if (!single) return { error: `You don't currently hold ${ticker}.` };
+          return { ...single, weightOfNavPct: null };
+        }
+        const weightOfNavPct =
+          portfolio.totalMarketValue > 0 && h.marketValueCad != null
+            ? (h.marketValueCad / portfolio.totalMarketValue) * 100
+            : null;
+        return { ...h, weightOfNavPct };
       },
     },
 
@@ -398,7 +419,7 @@ export function buildTools(
     {
       name: "get_performance_metrics",
       description:
-        "Portfolio performance and risk metrics computed from daily NAV snapshots. Returns TWR (period + annualized), IRR, beta vs the user's chosen benchmark, Sharpe ratio, max drawdown, and a return-vs-benchmark equity curve. Fields are null when their input is missing: beta + benchmark TWR require a benchmarkTicker; Sharpe requires riskFreeRate. If those are null, do NOT fabricate values — point the user to Settings → Performance profile. Returns null `correlation` when the user has fewer than 2 holdings.",
+        "Portfolio performance and risk metrics. Two distinct data sources — do not confuse them: (a) TWR / IRR / beta / Sharpe / maxDrawdown / equityCurve are computed from daily NAV SNAPSHOTS (so `snapshotCount` and `firstSnapshotDate` bound their reliability — beta on <30 snapshots is statistically meaningless). (b) The `correlation` matrix is computed from ~200 days of per-TICKER price candles, independent of snapshot count — its tickers list and matrix can be trusted even when snapshotCount is small, as long as the named tickers each have a full 200-day price history. Fields are null when their input is missing: beta + benchmark TWR require benchmarkTicker; Sharpe requires riskFreeRate; correlation returns null when the user has fewer than 2 holdings. Do NOT fabricate values for nulls — point the user to Settings → Performance profile.",
       parameters: { type: "object", properties: {}, additionalProperties: false },
       execute: async () => {
         const preferences = await getUserPreferences(userId);
@@ -590,6 +611,25 @@ export function buildTools(
           publishedAt: result.publishedAt?.toISOString() ?? null,
           body: result.body,
         };
+      },
+    },
+
+    {
+      name: "read_pdf",
+      description:
+        "Fetch a PDF URL and return its extracted text — for Canadian filings (CSE-listed issuers, SEDAR+ URLs the user has linked), annual reports, MD&As, or any other PDF the user points at. Text is condensed for token efficiency (whitespace collapsed, page-number noise stripped, repeating header/footer lines deduped). Returns `pageCount`, `sourceChars` (length BEFORE truncation), and `truncated` (true if cut at the 36k-char cap — large annual reports will hit this; call again with a narrower URL like a specific filing exhibit when relevant). Returns an error when the URL doesn't resolve to a PDF.",
+      parameters: {
+        type: "object",
+        properties: { url: { type: "string" } },
+        required: ["url"],
+        additionalProperties: false,
+      },
+      execute: async (input) => {
+        const url = String(getProp(input, "url") ?? "");
+        if (!url) return { error: "Missing url." };
+        const result = await fetchPdfText(url);
+        if (!result) return { error: `Couldn't fetch or parse PDF at ${url}.` };
+        return result;
       },
     },
 
@@ -1105,7 +1145,7 @@ export function buildTools(
     {
       name: "propose_decision",
       description:
-        "Write a decision into the user's Decision Hub inbox. Use this when your recommendation is concrete enough to merit tracking: a specific action on a specific ticker (or portfolio-level), with a rationale, a sizing frame, an invalidation trigger, and ideally a review event. Do NOT call this for general discussion, exploratory questions, or hold-and-do-nothing answers. The user closes the loop manually in the Hub by recording what they actually did. Calling this tool is how the Hub gets cross-chat memory of your recommendations.",
+        "Write a decision into the user's Decision Hub inbox. Use this when your recommendation is concrete enough to merit tracking: a specific action on a specific ticker (or portfolio-level). Do NOT call this for general discussion, exploratory questions, or hold-and-do-nothing answers. The user closes the loop manually in the Hub. Three fields carry the value: WHAT (action + ticker), WHY (one coherent rationale that absorbs the thesis reasoning, the falsifier/'what would change this', and the review trigger as natural-language clauses — NOT separate sections), and DEGREE (structured numbers in `sizingDetails`: how much to trim/add, target weight, dollar impact). Do not write parallel prose fields — one rationale, one structured degree object.",
       parameters: {
         type: "object",
         properties: {
@@ -1129,56 +1169,30 @@ export function buildTools(
           urgency: {
             type: "string",
             enum: ["INFO", "MATERIAL", "URGENT"],
-            description: "MATERIAL by default. URGENT only when there's a real time-decay (earnings within 48h, ex-div on Monday, TLH window closing, etc.). INFO for low-priority watch items.",
+            description: "MATERIAL by default (it's the implicit baseline — only set URGENT or INFO when you genuinely mean them). URGENT = real time-decay (earnings within 48h, ex-div on Monday, TLH window closing). INFO = low-priority watch item.",
           },
           message: {
             type: "string",
-            description: "One-line summary shown on the inbox card. Plain English, e.g. 'Trim 2 AVGO to bring back inside 12% cap.'",
+            description: "One-line summary shown on the inbox card. Plain English, e.g. 'Trim AVGO to bring it back inside the 20% cap.'",
           },
           rationale: {
             type: "string",
-            description: "1-3 sentences in PM voice. WHY this name, now. Should be the thesis-grounded reason — not generic.",
-          },
-          actionDetails: {
-            type: "object",
-            description: "Structured spec of the trade: ticker, quantity, priceContext, account when relevant.",
-            properties: {
-              ticker: { type: "string" },
-              quantity: { type: "number" },
-              priceContext: { type: "string", description: "e.g. '$408-412' or 'at market'." },
-              account: { type: "string", description: "e.g. 'TFSA', 'NON_REGISTERED', 'RRSP'." },
-            },
-            additionalProperties: true,
-          },
-          sizingRationale: {
-            type: "string",
-            description: "1-2 sentences on WHY this size. NAV terms, not share-count terms. Required for ADD / TRIM / EXIT.",
+            description: "ONE coherent reasoning paragraph or two (typically 3-6 sentences). Includes (a) the thesis-grounded WHY, (b) what would change this call (the falsifier, as a clause — 'I'd reverse this if X'), and (c) when to revisit (e.g. 'next earnings on Sept 3'). Do NOT split these into separate fields — the reader wants one coherent narrative, not five bullets. Cite numbers verbatim from the data; this is the prose that drives the decision.",
           },
           sizingDetails: {
             type: "object",
-            description: "Structured sizing math: nominalUsd, pctOfNav, maxLossToInvalidationUsd, maxLossToInvalidationPctOfNav, postTradePositionPctOfNav, postTradeBucketPctOfTarget. Use the fields that apply.",
+            description: "Structured DEGREE — how much. Use the keys that apply for this action: `targetWeightPct` (where you're trying to get the position to, in %), `currentWeightPct` (where it is now, in %), `expectedSharesDelta` (positive = buy, negative = sell), `expectedDollarDelta` (cash impact in CAD, positive = deploy, negative = freed). For HOLD_THROUGH_DRAWDOWN or REVIEW_THESIS leave empty. Numbers only — no prose explanation here (that goes in `rationale`).",
+            properties: {
+              targetWeightPct: { type: "number" },
+              currentWeightPct: { type: "number" },
+              expectedSharesDelta: { type: "number" },
+              expectedDollarDelta: { type: "number" },
+            },
             additionalProperties: true,
-          },
-          supportingEvidence: {
-            type: "object",
-            description: "Frozen snapshot of the numbers you cited: quote, position size, IPS drift, correlation values, transcript excerpt, etc. Will be displayed as-is on the detail page.",
-            additionalProperties: true,
-          },
-          alternativesConsidered: {
-            type: "string",
-            description: "1-2 sentences naming what you chose this over. Required for any ADD — capital-allocation discipline.",
-          },
-          invalidationTrigger: {
-            type: "string",
-            description: "What would make THIS decision wrong (separate from thesis invalidation). e.g. 'Q4 sequential revenue growth < 5% on Sept 2 print.'",
-          },
-          reviewEvent: {
-            type: "string",
-            description: "Human-readable trigger that should bring this decision back up for review, e.g. 'Sept 2 earnings'.",
           },
           reviewByDate: {
             type: "string",
-            description: "ISO date (YYYY-MM-DD) by which the decision should be reviewed.",
+            description: "ISO date (YYYY-MM-DD) by which the decision should be reviewed. The human-readable review trigger (e.g. 'next earnings on Sept 3') goes inside `rationale`; this field is just the date for the countdown.",
           },
         },
         required: ["recommendedAction", "message", "rationale"],
@@ -1193,15 +1207,9 @@ export function buildTools(
         const urgency = (getProp(args, "urgency") as string | undefined) ?? "MATERIAL";
         const message = getProp(args, "message") as string;
         const rationale = getProp(args, "rationale") as string;
-        const sizingRationale = getProp(args, "sizingRationale") as string | undefined;
-        const alternativesConsidered = getProp(args, "alternativesConsidered") as string | undefined;
-        const invalidationTrigger = getProp(args, "invalidationTrigger") as string | undefined;
-        const reviewEvent = getProp(args, "reviewEvent") as string | undefined;
         const reviewByDateStr = getProp(args, "reviewByDate") as string | undefined;
         const reviewByDate = reviewByDateStr ? new Date(reviewByDateStr) : null;
-        const actionDetails = getProp(args, "actionDetails") as Record<string, unknown> | null | undefined;
         const sizingDetails = getProp(args, "sizingDetails") as Record<string, unknown> | null | undefined;
-        const supportingEvidence = getProp(args, "supportingEvidence") as Record<string, unknown> | null | undefined;
 
         try {
           const event = await createDecisionEvent({
@@ -1213,13 +1221,7 @@ export function buildTools(
             recommendedAction: action as Parameters<typeof createDecisionEvent>[0]["recommendedAction"],
             urgency: urgency as Parameters<typeof createDecisionEvent>[0]["urgency"],
             rationale,
-            actionDetails: actionDetails ?? null,
-            sizingRationale: sizingRationale ?? null,
             sizingDetails: sizingDetails ?? null,
-            supportingEvidence: supportingEvidence ?? null,
-            alternativesConsidered: alternativesConsidered ?? null,
-            invalidationTrigger: invalidationTrigger ?? null,
-            reviewEvent: reviewEvent ?? null,
             reviewByDate: reviewByDate && !isNaN(reviewByDate.getTime()) ? reviewByDate : null,
           });
           return {
@@ -1235,6 +1237,51 @@ export function buildTools(
       },
     },
   ];
+  return tools.map(withRoundedOutput);
+}
+
+/**
+ * Default precision for ALL tool outputs:
+ *   • integers stay integers (share counts, days, IDs, timestamps)
+ *   • |n| ≥ 1 → rounded to 2 decimals (prices, weights, percentages, multiples)
+ *   • 0 < |n| < 1 → rounded to 4 decimals (penny stocks, fractional shares,
+ *     small ratios — the only case where sub-cent precision actually carries
+ *     signal)
+ *   • NaN / Infinity pass through unchanged
+ *
+ * Prevents tool outputs from emitting raw floating-point garbage like
+ * 33.781234567 that the model otherwise reads back verbatim and that wastes
+ * tokens for no informational gain.
+ */
+function smartRound(n: number): number {
+  if (!Number.isFinite(n)) return n;
+  if (Number.isInteger(n)) return n;
+  if (n === 0) return 0;
+  if (Math.abs(n) < 1) return Math.round(n * 10_000) / 10_000;
+  return Math.round(n * 100) / 100;
+}
+
+function roundDeep(value: unknown): unknown {
+  if (typeof value === "number") return smartRound(value);
+  if (Array.isArray(value)) return value.map(roundDeep);
+  if (value && typeof value === "object" && !(value instanceof Date)) {
+    const out: Record<string, unknown> = {};
+    for (const k of Object.keys(value)) {
+      out[k] = roundDeep((value as Record<string, unknown>)[k]);
+    }
+    return out;
+  }
+  return value;
+}
+
+function withRoundedOutput(tool: ToolDefinition): ToolDefinition {
+  return {
+    ...tool,
+    execute: async (input) => {
+      const result = await tool.execute(input);
+      return roundDeep(result);
+    },
+  };
 }
 
 function getProp(obj: unknown, key: string): unknown {

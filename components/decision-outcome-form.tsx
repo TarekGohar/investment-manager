@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { recordDecisionOutcomeAction } from "@/app/actions/decisions";
 import { useToast } from "@/components/toast-provider";
-import type { DecisionOutcome } from "@/generated/prisma";
+import type { DecisionOutcome, RecommendedAction } from "@/generated/prisma";
 
 type OutcomeOption = Exclude<DecisionOutcome, "OPEN" | "EXPIRED">;
 
@@ -31,7 +31,29 @@ const OPTIONS: { value: OutcomeOption; label: string; help: string }[] = [
   },
 ];
 
-export function DecisionOutcomeForm({ eventId }: { eventId: string }) {
+const SELL_ACTIONS: RecommendedAction[] = ["TRIM", "EXIT", "HARVEST_LOSS"];
+
+type Props = {
+  eventId: string;
+  recommendedAction: RecommendedAction;
+  /** Sell-type actions: shares currently held (full position for TRIM/EXIT,
+   *  non-reg pool for HARVEST_LOSS). Buy-type: null. */
+  maxQuantity: number | null;
+  /** Buy-type actions: the quantity the original recommendation specified, if
+   *  the proposer set actionDetails.quantity. Null otherwise. */
+  recommendedQuantity: number | null;
+  /** Latest available market price for the ticker. Null if no quote available
+   *  or the decision is portfolio-level (no ticker). */
+  marketPrice: number | null;
+};
+
+export function DecisionOutcomeForm({
+  eventId,
+  recommendedAction,
+  maxQuantity,
+  recommendedQuantity,
+  marketPrice,
+}: Props) {
   const router = useRouter();
   const toast = useToast();
   const [pending, startTransition] = useTransition();
@@ -41,6 +63,29 @@ export function DecisionOutcomeForm({ eventId }: { eventId: string }) {
   const [notes, setNotes] = useState("");
 
   const isExecuted = outcome === "EXECUTED_AS_RECOMMENDED" || outcome === "EXECUTED_REVISED";
+  const isSellAction = SELL_ACTIONS.includes(recommendedAction);
+  const priceLabel = isSellAction
+    ? "Sale price (per share)"
+    : recommendedAction === "ADD" || recommendedAction === "DEPLOY_ELSEWHERE"
+      ? "Purchase price (per share)"
+      : "Price per share";
+  const quantityHint =
+    isSellAction && maxQuantity != null && maxQuantity > 0
+      ? `${maxQuantity} held${recommendedAction === "HARVEST_LOSS" ? " in non-registered" : ""}`
+      : !isSellAction && recommendedQuantity != null && recommendedQuantity > 0
+        ? `recommended ${recommendedQuantity}`
+        : null;
+  const quantityFillValue =
+    isSellAction && maxQuantity != null && maxQuantity > 0
+      ? maxQuantity
+      : !isSellAction && recommendedQuantity != null && recommendedQuantity > 0
+        ? recommendedQuantity
+        : null;
+  const overMax =
+    isSellAction &&
+    maxQuantity != null &&
+    parseNum(executedQuantity) != null &&
+    (parseNum(executedQuantity) as number) > maxQuantity;
 
   function submit() {
     if (!outcome) return;
@@ -98,32 +143,69 @@ export function DecisionOutcomeForm({ eventId }: { eventId: string }) {
       {isExecuted && (
         <div className="mt-4 space-y-3">
           <div>
-            <label className="block text-xs font-semibold text-muted">
-              Quantity executed
-            </label>
-            <input
-              type="number"
-              inputMode="decimal"
-              step="0.001"
-              value={executedQuantity}
-              onChange={(e) => setExecutedQuantity(e.target.value)}
-              placeholder="e.g. 3"
-              className="mt-1 w-full rounded-[8px] border border-border bg-panel px-2.5 py-1.5 text-sm tabular-nums"
-            />
+            <div className="flex items-baseline justify-between gap-2">
+              <label className="block text-xs font-semibold text-muted">
+                Quantity executed
+              </label>
+              {quantityHint ? (
+                <span className="text-[11px] text-muted-2">{quantityHint}</span>
+              ) : null}
+            </div>
+            <div className="mt-1 flex gap-2">
+              <input
+                type="number"
+                inputMode="decimal"
+                step="0.001"
+                value={executedQuantity}
+                onChange={(e) => setExecutedQuantity(e.target.value)}
+                placeholder="e.g. 3"
+                className="flex-1 rounded-[8px] border border-border bg-panel px-2.5 py-1.5 text-sm tabular-nums"
+              />
+              {quantityFillValue != null ? (
+                <button
+                  type="button"
+                  onClick={() => setExecutedQuantity(String(quantityFillValue))}
+                  className="rounded-[8px] border border-border bg-panel px-2.5 py-1.5 text-xs font-semibold text-muted transition-colors hover:text-text"
+                >
+                  {isSellAction ? "Max" : "Recommended"}
+                </button>
+              ) : null}
+            </div>
+            {overMax ? (
+              <p className="mt-1 text-[11px] text-warning">
+                Larger than the {maxQuantity} {recommendedAction === "HARVEST_LOSS" ? "non-registered " : ""}shares on file — double-check.
+              </p>
+            ) : null}
           </div>
           <div>
-            <label className="block text-xs font-semibold text-muted">
-              Fill price (per share)
-            </label>
-            <input
-              type="number"
-              inputMode="decimal"
-              step="0.01"
-              value={executedPrice}
-              onChange={(e) => setExecutedPrice(e.target.value)}
-              placeholder="e.g. 409.50"
-              className="mt-1 w-full rounded-[8px] border border-border bg-panel px-2.5 py-1.5 text-sm tabular-nums"
-            />
+            <div className="flex items-baseline justify-between gap-2">
+              <label className="block text-xs font-semibold text-muted">
+                {priceLabel}
+              </label>
+              {marketPrice != null ? (
+                <span className="text-[11px] text-muted-2">market ${marketPrice.toFixed(2)}</span>
+              ) : null}
+            </div>
+            <div className="mt-1 flex gap-2">
+              <input
+                type="number"
+                inputMode="decimal"
+                step="0.01"
+                value={executedPrice}
+                onChange={(e) => setExecutedPrice(e.target.value)}
+                placeholder="e.g. 409.50"
+                className="flex-1 rounded-[8px] border border-border bg-panel px-2.5 py-1.5 text-sm tabular-nums"
+              />
+              {marketPrice != null ? (
+                <button
+                  type="button"
+                  onClick={() => setExecutedPrice(marketPrice.toFixed(2))}
+                  className="rounded-[8px] border border-border bg-panel px-2.5 py-1.5 text-xs font-semibold text-muted transition-colors hover:text-text"
+                >
+                  Use market
+                </button>
+              ) : null}
+            </div>
           </div>
         </div>
       )}

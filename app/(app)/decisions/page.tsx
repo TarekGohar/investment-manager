@@ -15,10 +15,13 @@ import type { DecisionUrgency } from "@/generated/prisma";
 
 const URGENCY_ORDER: DecisionUrgency[] = ["URGENT", "MATERIAL", "INFO"];
 
+// "Material" is the implicit default — most decisions are MATERIAL, so the
+// section header reads better without the word repeated. URGENT and INFO are
+// the ones that actually carry signal.
 const URGENCY_LABEL: Record<DecisionUrgency, string> = {
   URGENT: "Urgent",
-  MATERIAL: "Material",
-  INFO: "Informational",
+  MATERIAL: "Decisions",
+  INFO: "Lower priority",
 };
 
 export default async function DecisionsPage() {

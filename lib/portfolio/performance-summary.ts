@@ -75,7 +75,7 @@ export async function getPerformanceSummary(
     }
   }
 
-  const portfolioReturns = dailyReturnsFromSnapshots(snapshots);
+  const portfolioReturns = dailyReturnsFromSnapshots(snapshots, transactions);
   const days = portfolioReturns.length;
 
   const portfolioTwr = twr(portfolioReturns);

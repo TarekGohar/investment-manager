@@ -170,12 +170,42 @@ export async function backfillSnapshots(
     30,
     Math.ceil((to.getTime() - fromDay.getTime()) / 86_400_000) + 10,
   );
-  const candlesByTicker = new Map<string, Map<string, number>>();
+  // Pre-build a sorted (date, close) array per ticker for O(log n) forward-fill
+  // lookup. Forward-fill is necessary because a backfilled day might fall on a
+  // market holiday for SOME of the user's tickers (e.g. US Independence Day —
+  // US tickers have no candle, Canadian listings still trade). Without
+  // forward-fill, computeSnapshot treats the missing US closes as $0 and the
+  // whole snapshot day appears to crash to ~CAD-only value — which breaks TWR,
+  // beta, and max-drawdown calculations downstream.
+  type TickerCandles = { dates: string[]; closes: number[] };
+  const candlesByTicker = new Map<string, TickerCandles>();
   for (const t of tickers) {
     const candles = await getCandles(t, daysSpan);
-    const map = new Map<string, number>();
-    for (const c of candles) map.set(toIsoDate(c.ts), c.close);
-    candlesByTicker.set(t, map);
+    const sorted = [...candles].sort((a, b) => a.ts.getTime() - b.ts.getTime());
+    candlesByTicker.set(t, {
+      dates: sorted.map((c) => toIsoDate(c.ts)),
+      closes: sorted.map((c) => c.close),
+    });
+  }
+
+  function priceAsOf(ticker: string, iso: string): number | null {
+    const tc = candlesByTicker.get(ticker);
+    if (!tc || tc.dates.length === 0) return null;
+    // Binary search for the latest dates[i] <= iso. ISO strings sort
+    // lexicographically and match calendar order, so string compare is fine.
+    let lo = 0;
+    let hi = tc.dates.length - 1;
+    let idx = -1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (tc.dates[mid] <= iso) {
+        idx = mid;
+        lo = mid + 1;
+      } else {
+        hi = mid - 1;
+      }
+    }
+    return idx === -1 ? null : tc.closes[idx];
   }
 
   // Existing snapshot dates for this user, to dedupe.
@@ -198,7 +228,7 @@ export async function backfillSnapshots(
     const dow = asOf.getUTCDay();
     if (dow === 0 || dow === 6) continue;
 
-    const priceLookup = (t: string) => candlesByTicker.get(t)?.get(iso) ?? null;
+    const priceLookup = (t: string) => priceAsOf(t, iso);
     // Historical FX rate for this date — uses BoC cache when present,
     // falls back to today's if the historical date is too old to fetch.
     // For Canadian-only or USD-only portfolios this is a no-op.

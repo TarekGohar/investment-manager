@@ -50,6 +50,39 @@ type ToolUse = {
 
 type DecisionPill = { id: string; url: string };
 
+/** EscalationRequest payload carried by the `escalation_requested` SSE event.
+ *  Mirrors `lib/ai/panel/types.ts:EscalationRequest` — duplicated here so
+ *  this client component doesn't pull in the server module. */
+type ClientEscalationRequest = {
+  topic: string;
+  ticker: string | null;
+  reason: string;
+  recommendedSpecialists: string[];
+};
+
+type SpecialistStatus = "queued" | "running" | "done" | "error";
+
+type PanelRun = {
+  status:
+    | "awaiting_confirm"
+    | "running"
+    | "synthesizing"
+    | "complete"
+    | "error"
+    | "dismissed";
+  request: ClientEscalationRequest;
+  /** Per-specialist status by role name. */
+  specialists: Record<
+    string,
+    { status: SpecialistStatus; durationMs?: number; error?: string }
+  >;
+  /** Wall-clock start when /panel/confirm POST began (unix ms). */
+  startedAt?: number;
+  /** Wall-clock complete (unix ms). */
+  completedAt?: number;
+  errorMsg?: string;
+};
+
 type DisplayMessage =
   | { role: "user"; id: string; text: string }
   | {
@@ -65,7 +98,28 @@ type DisplayMessage =
       warning?: string;
       /** Decision Hub entries raised by `propose_decision` during this turn. */
       decisions?: DecisionPill[];
+      /** Live state of an investment-committee panel request originating
+       *  from this assistant turn. Set when `escalation_requested` fires
+       *  and updated through the panel-confirm SSE stream. */
+      panel?: PanelRun;
+      /** Synthesized text + tools streamed back from /panel/confirm. Lives
+       *  alongside the assistant's own `text`/`tools` so the CIO's pre-panel
+       *  framing and the post-panel synthesis don't overwrite each other. */
+      synthesisText?: string;
+      synthesisTools?: ToolUse[];
+      synthesisStreaming?: boolean;
     };
+
+const SPECIALIST_LABELS: Record<string, string> = {
+  BUSINESS_ANALYST: "Business Analyst",
+  VALUATION_ANALYST: "Valuation Analyst",
+  RISK_PORTFOLIO: "Risk & Portfolio",
+  TAX_STRATEGIST: "Tax Strategist",
+  BEHAVIORAL_COACH: "Behavioral Coach",
+  MACRO_INDUSTRY: "Macro & Industry",
+  DEVILS_ADVOCATE: "Devil's Advocate",
+  CAPITAL_ALLOCATOR: "Capital Allocator",
+};
 
 const PORTFOLIO_SUGGESTIONS = [
   "How is my portfolio doing today?",
@@ -107,6 +161,7 @@ export function ChatUI({
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const panelAbortRef = useRef<AbortController | null>(null);
   // Mirrors of state used inside event handlers that would otherwise capture
   // stale closures (e.g. the visibilitychange listener).
   const messagesRef = useRef(messages);
@@ -199,12 +254,22 @@ export function ChatUI({
     const controller = new AbortController();
     abortRef.current = controller;
 
+    // Tracks whether the upstream stream signalled a clean `done`. Set inside
+    // the SSE dispatcher (where new state is correctly observable), then read
+    // synchronously after streamChat resolves. We need this because
+    // `messagesRef.current` does NOT sync with `setMessages` updates until
+    // after the next render — so the post-stream stuck check would otherwise
+    // see `streaming: true` for one tick and wrongly fire `reconcileFromServer`,
+    // wiping client-only state like the panel-confirm button.
+    let receivedDone = false;
+
     await streamChat(
       text,
       conversationId,
       scope,
       controller.signal,
       (event, data) => {
+        if (event === "done") receivedDone = true;
         setMessages((current) =>
           current.map((m) => {
             if (m.id !== assistantId || m.role !== "assistant") return m;
@@ -249,6 +314,31 @@ export function ChatUI({
                     { id: String(data.decisionId), url: String(data.url) },
                   ],
                 };
+              case "escalation_requested": {
+                // CIO has requested a panel run via request_panel. The user
+                // confirms via the bubble's "Convene panel" button — we don't
+                // fire anything here.
+                const req: ClientEscalationRequest = {
+                  topic: String(data.topic ?? ""),
+                  ticker: data.ticker ? String(data.ticker) : null,
+                  reason: String(data.reason ?? ""),
+                  recommendedSpecialists: Array.isArray(data.recommendedSpecialists)
+                    ? data.recommendedSpecialists.map(String)
+                    : [],
+                };
+                const specialists: PanelRun["specialists"] = {};
+                for (const s of req.recommendedSpecialists) {
+                  specialists[s] = { status: "queued" };
+                }
+                return {
+                  ...m,
+                  panel: {
+                    status: "awaiting_confirm",
+                    request: req,
+                    specialists,
+                  },
+                };
+              }
               case "done":
                 return { ...m, streaming: false };
               case "warning":
@@ -283,13 +373,12 @@ export function ChatUI({
     // instead of a stranded error pill.
     const wasUserStopped = userStoppedRef.current;
     userStoppedRef.current = false;
-    if (!wasUserStopped) {
-      const stuck = messagesRef.current.find(
-        (m) => m.id === assistantId && m.role === "assistant" && (m.streaming || m.error),
-      );
-      if (stuck) {
-        void reconcileFromServer();
-      }
+    // Only reconcile when the stream did NOT signal a clean `done`. A clean
+    // done means the server finished and persisted on its own; reconciling
+    // would refetch the persisted message (which lacks client-only state
+    // like the panel-confirm card) and clobber what's on screen.
+    if (!wasUserStopped && !receivedDone) {
+      void reconcileFromServer();
     }
   }
 
@@ -309,6 +398,77 @@ export function ChatUI({
       }).catch(() => {});
     }
     abortRef.current?.abort();
+  }
+
+  async function confirmPanel(messageId: string) {
+    const convId = conversationIdRef.current;
+    if (!convId) return;
+    const target = messagesRef.current.find(
+      (m) => m.id === messageId && m.role === "assistant",
+    );
+    if (!target || target.role !== "assistant" || !target.panel) return;
+    const request = target.panel.request;
+
+    const controller = new AbortController();
+    panelAbortRef.current = controller;
+
+    // Move from "awaiting_confirm" to "running" and prepare synthesis buffers.
+    setMessages((current) =>
+      current.map((m) => {
+        if (m.id !== messageId || m.role !== "assistant" || !m.panel) return m;
+        return {
+          ...m,
+          panel: {
+            ...m.panel,
+            status: "running",
+            startedAt: Date.now(),
+          },
+          synthesisText: "",
+          synthesisTools: [],
+          synthesisStreaming: true,
+        };
+      }),
+    );
+
+    await streamPanelConfirm(convId, request, controller.signal, (event, data) => {
+      setMessages((current) =>
+        current.map((m) => {
+          if (m.id !== messageId || m.role !== "assistant" || !m.panel) return m;
+          return applyPanelEvent(m, event, data);
+        }),
+      );
+    });
+
+    panelAbortRef.current = null;
+    window.dispatchEvent(new Event(AI_USAGE_REFRESH_EVENT));
+  }
+
+  function dismissPanel(messageId: string) {
+    setMessages((current) =>
+      current.map((m) => {
+        if (m.id !== messageId || m.role !== "assistant" || !m.panel) return m;
+        return { ...m, panel: { ...m.panel, status: "dismissed" } };
+      }),
+    );
+  }
+
+  function stopPanel(messageId: string) {
+    panelAbortRef.current?.abort();
+    setMessages((current) =>
+      current.map((m) => {
+        if (m.id !== messageId || m.role !== "assistant" || !m.panel) return m;
+        return {
+          ...m,
+          panel: {
+            ...m.panel,
+            status: "error",
+            errorMsg: "Stopped by user.",
+            completedAt: Date.now(),
+          },
+          synthesisStreaming: false,
+        };
+      }),
+    );
   }
 
   function handleSubmit(e: React.FormEvent) {
@@ -340,7 +500,13 @@ export function ChatUI({
         ) : (
           <div className="mx-auto max-w-3xl space-y-7">
             {messages.map((m) => (
-              <MessageRow key={m.id} message={m} />
+              <MessageRow
+                key={m.id}
+                message={m}
+                onConfirmPanel={confirmPanel}
+                onDismissPanel={dismissPanel}
+                onStopPanel={stopPanel}
+              />
             ))}
           </div>
         )}
@@ -432,7 +598,104 @@ function EmptyState({
   );
 }
 
-function MessageRow({ message }: { message: DisplayMessage }) {
+// Applies a panel-confirm SSE event to a single assistant message. Pure —
+// returns a new message or the same reference if the event is irrelevant.
+function applyPanelEvent(
+  m: Extract<DisplayMessage, { role: "assistant" }>,
+  event: string,
+  data: any,
+): DisplayMessage {
+  if (!m.panel) return m;
+  switch (event) {
+    case "specialist_started": {
+      const name = String(data.specialist);
+      return {
+        ...m,
+        panel: {
+          ...m.panel,
+          specialists: {
+            ...m.panel.specialists,
+            [name]: {
+              ...(m.panel.specialists[name] ?? { status: "queued" as SpecialistStatus }),
+              status: "running" as SpecialistStatus,
+            },
+          },
+        },
+      };
+    }
+    case "specialist_completed": {
+      const name = String(data.specialist);
+      const success = Boolean(data.success);
+      return {
+        ...m,
+        panel: {
+          ...m.panel,
+          specialists: {
+            ...m.panel.specialists,
+            [name]: {
+              status: (success ? "done" : "error") as SpecialistStatus,
+              durationMs: typeof data.durationMs === "number" ? data.durationMs : undefined,
+              error: data.error ? String(data.error) : undefined,
+            },
+          },
+        },
+      };
+    }
+    case "synthesis_starting":
+      return { ...m, panel: { ...m.panel, status: "synthesizing" } };
+    case "text":
+      return { ...m, synthesisText: (m.synthesisText ?? "") + String(data.delta ?? "") };
+    case "tool_call":
+      return {
+        ...m,
+        synthesisTools: [
+          ...(m.synthesisTools ?? []),
+          { id: String(data.id), name: String(data.name), status: "calling" as ToolStatus },
+        ],
+      };
+    case "tool_result":
+      return {
+        ...m,
+        synthesisTools: (m.synthesisTools ?? []).map((t) =>
+          t.id === String(data.id)
+            ? { ...t, status: (data.isError ? "error" : "done") as ToolStatus }
+            : t,
+        ),
+      };
+    case "done":
+      return {
+        ...m,
+        panel: {
+          ...m.panel,
+          status: m.panel.errorMsg ? "error" : "complete",
+          completedAt: Date.now(),
+        },
+        synthesisStreaming: false,
+      };
+    case "error":
+      return {
+        ...m,
+        panel: {
+          ...m.panel,
+          status: "error",
+          errorMsg: String(data.error ?? "Panel run failed"),
+          completedAt: Date.now(),
+        },
+        synthesisStreaming: false,
+      };
+    default:
+      return m;
+  }
+}
+
+type MessageRowProps = {
+  message: DisplayMessage;
+  onConfirmPanel: (messageId: string) => void;
+  onDismissPanel: (messageId: string) => void;
+  onStopPanel: (messageId: string) => void;
+};
+
+function MessageRow({ message, onConfirmPanel, onDismissPanel, onStopPanel }: MessageRowProps) {
   if (message.role === "user") {
     return (
       <div className="flex justify-end">
@@ -482,6 +745,17 @@ function MessageRow({ message }: { message: DisplayMessage }) {
             </a>
           ))}
         </div>
+      ) : null}
+      {message.panel ? (
+        <PanelCard
+          panel={message.panel}
+          synthesisText={message.synthesisText}
+          synthesisTools={message.synthesisTools}
+          synthesisStreaming={message.synthesisStreaming}
+          onConfirm={() => onConfirmPanel(message.id)}
+          onDismiss={() => onDismissPanel(message.id)}
+          onStop={() => onStopPanel(message.id)}
+        />
       ) : null}
       {message.warning ? (
         <div className="rounded-[10px] border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
@@ -556,31 +830,11 @@ function SendIcon() {
 
 // ─── Stream parsing ─────────────────────────────────────────────────
 
-async function streamChat(
-  message: string,
-  conversationId: string | null,
-  scope: string,
+async function consumeSse(
+  response: Response,
   signal: AbortSignal,
   onEvent: (event: string, data: any) => void,
 ) {
-  let response: Response;
-  try {
-    response = await fetch("/api/ai/chat", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message, conversationId, scope }),
-      signal,
-    });
-  } catch (err) {
-    if (signal.aborted) {
-      onEvent("done", { aborted: true });
-      return;
-    }
-    const msg = err instanceof Error ? err.message : "Network error";
-    onEvent("error", { error: msg });
-    return;
-  }
-
   if (!response.ok || !response.body) {
     const text = await response.text().catch(() => "");
     onEvent("error", { error: text || `HTTP ${response.status}` });
@@ -625,4 +879,304 @@ async function streamChat(
     const msg = err instanceof Error ? err.message : "Stream failed";
     onEvent("error", { error: msg });
   }
+}
+
+async function streamChat(
+  message: string,
+  conversationId: string | null,
+  scope: string,
+  signal: AbortSignal,
+  onEvent: (event: string, data: any) => void,
+) {
+  let response: Response;
+  try {
+    response = await fetch("/api/ai/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message, conversationId, scope }),
+      signal,
+    });
+  } catch (err) {
+    if (signal.aborted) {
+      onEvent("done", { aborted: true });
+      return;
+    }
+    const msg = err instanceof Error ? err.message : "Network error";
+    onEvent("error", { error: msg });
+    return;
+  }
+  await consumeSse(response, signal, onEvent);
+}
+
+/**
+ * POSTs the user-confirmed escalation request to /api/ai/chat/panel/confirm
+ * and pipes the SSE events back through onEvent. Events the caller should
+ * handle: panel_running, specialist_started, specialist_completed,
+ * panel_complete, synthesis_starting, plus the standard text/tool/done/error
+ * frames during the synthesis pass.
+ */
+async function streamPanelConfirm(
+  conversationId: string,
+  request: ClientEscalationRequest,
+  signal: AbortSignal,
+  onEvent: (event: string, data: any) => void,
+) {
+  let response: Response;
+  try {
+    response = await fetch("/api/ai/chat/panel/confirm", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ conversationId, request }),
+      signal,
+    });
+  } catch (err) {
+    if (signal.aborted) {
+      onEvent("done", { aborted: true });
+      return;
+    }
+    const msg = err instanceof Error ? err.message : "Network error";
+    onEvent("error", { error: msg });
+    return;
+  }
+  await consumeSse(response, signal, onEvent);
+}
+
+// ─── Panel UI ───────────────────────────────────────────────────────
+
+function PanelCard({
+  panel,
+  synthesisText,
+  synthesisTools,
+  synthesisStreaming,
+  onConfirm,
+  onDismiss,
+  onStop,
+}: {
+  panel: PanelRun;
+  synthesisText: string | undefined;
+  synthesisTools: ToolUse[] | undefined;
+  synthesisStreaming: boolean | undefined;
+  onConfirm: () => void;
+  onDismiss: () => void;
+  onStop: () => void;
+}) {
+  if (panel.status === "dismissed") return null;
+  if (panel.status === "awaiting_confirm") {
+    return (
+      <EscalationConfirmCard
+        request={panel.request}
+        onConfirm={onConfirm}
+        onDismiss={onDismiss}
+      />
+    );
+  }
+  return (
+    <div className="space-y-3">
+      <PanelProgressCard
+        panel={panel}
+        synthesisStreaming={Boolean(synthesisStreaming)}
+        onStop={onStop}
+      />
+      {synthesisText && synthesisText.length > 0 ? (
+        <div className="rounded-[16px] border border-brand-2/30 bg-brand-2/5 p-4">
+          <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-brand-2">
+            CIO Synthesis
+          </div>
+          {synthesisTools && synthesisTools.length > 0 ? (
+            <div className="mb-2 flex flex-wrap gap-2">
+              {synthesisTools.map((t) => (
+                <ToolChip key={t.id} tool={t} />
+              ))}
+            </div>
+          ) : null}
+          <div className="relative">
+            <Markdown>{synthesisText}</Markdown>
+            {synthesisStreaming ? (
+              <span className="ml-0.5 inline-block h-[16px] w-[2px] translate-y-[3px] animate-pulse bg-text" />
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+      {panel.errorMsg ? (
+        <div className="rounded-[10px] border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">
+          {panel.errorMsg}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function EscalationConfirmCard({
+  request,
+  onConfirm,
+  onDismiss,
+}: {
+  request: ClientEscalationRequest;
+  onConfirm: () => void;
+  onDismiss: () => void;
+}) {
+  return (
+    <div className="rounded-[16px] border border-brand/40 bg-brand/5 p-4">
+      <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-brand-2">
+        <span className="inline-block h-1.5 w-1.5 rounded-full bg-brand-2" />
+        Convene the panel?
+      </div>
+      <p className="mb-3 text-[14px] leading-relaxed text-text">
+        {request.reason || "Specialists will produce structured memos and the CIO will synthesize."}
+      </p>
+      <div className="mb-3">
+        <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted">
+          Specialists ({request.recommendedSpecialists.length})
+        </div>
+        <ul className="space-y-0.5 text-[13px] text-text">
+          {request.recommendedSpecialists.map((s) => (
+            <li key={s} className="flex items-center gap-2">
+              <span className="text-muted">·</span>
+              {SPECIALIST_LABELS[s] ?? s}
+            </li>
+          ))}
+        </ul>
+      </div>
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={onConfirm}
+          className="rounded-full bg-brand px-4 py-1.5 text-sm font-semibold text-white transition-colors hover:bg-brand-2"
+        >
+          Convene panel
+        </button>
+        <button
+          type="button"
+          onClick={onDismiss}
+          className="rounded-full border border-border bg-panel px-4 py-1.5 text-sm font-semibold text-muted transition-colors hover:text-text"
+        >
+          Not now
+        </button>
+      </div>
+      <p className="mt-3 text-[11px] text-muted">
+        Estimated time: 2–3 minutes. Costs Opus tokens for each specialist memo plus the synthesis pass.
+      </p>
+    </div>
+  );
+}
+
+function PanelProgressCard({
+  panel,
+  synthesisStreaming,
+  onStop,
+}: {
+  panel: PanelRun;
+  synthesisStreaming: boolean;
+  onStop: () => void;
+}) {
+  const elapsed = useLiveElapsed(panel.startedAt, panel.completedAt, panel.status);
+  const inFlight = panel.status === "running" || panel.status === "synthesizing";
+
+  const specialists = Object.entries(panel.specialists);
+  const doneCount = specialists.filter(([, s]) => s.status === "done").length;
+  const errorCount = specialists.filter(([, s]) => s.status === "error").length;
+
+  let headerStatus = "Convening panel";
+  if (panel.status === "synthesizing") headerStatus = "Synthesizing memos";
+  else if (panel.status === "complete") headerStatus = "Panel complete";
+  else if (panel.status === "error") headerStatus = "Panel error";
+
+  return (
+    <div className="rounded-[16px] border border-brand-2/30 bg-brand-2/5 p-4">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <div>
+          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-brand-2">
+            {inFlight ? <DotLoader /> : null}
+            Investment-committee panel
+          </div>
+          <div className="mt-0.5 text-[13px] text-text">
+            {headerStatus}
+            {" · "}
+            <span className="tabular-nums">{formatElapsed(elapsed)}</span>
+            {doneCount + errorCount > 0 ? (
+              <span className="text-muted">
+                {" · "}
+                {doneCount}/{specialists.length} done
+                {errorCount > 0 ? `, ${errorCount} error` : ""}
+              </span>
+            ) : null}
+          </div>
+        </div>
+        {inFlight ? (
+          <button
+            type="button"
+            onClick={onStop}
+            className="rounded-full border border-border bg-panel px-3 py-1 text-xs font-semibold text-muted transition-colors hover:text-text"
+          >
+            Stop
+          </button>
+        ) : null}
+      </div>
+      <ul className="space-y-1.5">
+        {specialists.map(([name, s]) => (
+          <li
+            key={name}
+            className="flex items-center justify-between gap-3 rounded-md bg-panel/40 px-3 py-1.5 text-[13px]"
+          >
+            <div className="flex items-center gap-2.5">
+              <SpecialistStatusIndicator status={s.status} />
+              <span className={s.status === "running" ? "text-text" : "text-muted"}>
+                {SPECIALIST_LABELS[name] ?? name}
+              </span>
+            </div>
+            <span className="tabular-nums text-[11px] text-muted">
+              {s.status === "done" && typeof s.durationMs === "number"
+                ? formatElapsed(s.durationMs)
+                : s.status === "error"
+                  ? "error"
+                  : s.status === "running"
+                    ? "running…"
+                    : ""}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function SpecialistStatusIndicator({ status }: { status: SpecialistStatus }) {
+  if (status === "running") {
+    return (
+      <span className="inline-flex h-4 w-4 items-center justify-center text-brand-2">
+        <DotLoader />
+      </span>
+    );
+  }
+  if (status === "done") {
+    return <span className="inline-block h-4 w-4 text-center text-brand-2">✓</span>;
+  }
+  if (status === "error") {
+    return <span className="inline-block h-4 w-4 text-center text-danger">✗</span>;
+  }
+  return <span className="inline-block h-4 w-4 text-center text-muted">·</span>;
+}
+
+function useLiveElapsed(
+  startedAt: number | undefined,
+  completedAt: number | undefined,
+  status: PanelRun["status"],
+): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (status !== "running" && status !== "synthesizing") return;
+    const id = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, [status]);
+  if (!startedAt) return 0;
+  if (completedAt) return completedAt - startedAt;
+  return now - startedAt;
+}
+
+function formatElapsed(ms: number): string {
+  if (ms < 0) ms = 0;
+  const totalSeconds = Math.floor(ms / 1000);
+  const m = Math.floor(totalSeconds / 60);
+  const s = totalSeconds % 60;
+  return `${m}:${s.toString().padStart(2, "0")}`;
 }

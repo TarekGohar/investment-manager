@@ -9,6 +9,15 @@ import { detectSuperficialLosses } from "@/lib/canadian/superficial-loss";
 import { expandCorporateActions } from "./corporate-actions";
 
 /**
+ * Home-exchange currency for a ticker — duplicated from lib/marketdata to
+ * avoid pulling that module's server-only quote fetchers into the pure
+ * derivation path.
+ */
+function listingCurrencyFor(ticker: string): "USD" | "CAD" {
+  return /\.(TO|V|NE|CN)$/.test(ticker.toUpperCase()) ? "CAD" : "USD";
+}
+
+/**
  * Canadian ACB-aware holding derivation.
  *
  * For NON_REGISTERED + JOINT_NON_REGISTERED brokerages (the "ACB pool"):
@@ -302,6 +311,7 @@ export function deriveHoldings(transactions: Tx[]): Holding[] {
     holdings.push({
       ticker,
       currency: positionCurrency,
+      listingCurrency: listingCurrencyFor(ticker),
       quantity: totalQty,
       costBasis: nonRegCostBasis + regCost,
       nonRegQuantity: nonRegQty,

@@ -325,73 +325,86 @@ export async function fetchTickerInsights(
   };
 }
 
-/** Multi-year annual financial statements (income / balance / cash flow). */
+/** Multi-year annual financial statements (income / balance / cash flow).
+ *
+ * Sourced from Yahoo's `fundamentalsTimeSeries` endpoint — the legacy
+ * `quoteSummary` statement modules went mostly empty in November 2024 and the
+ * upstream lib now emits a runtime warning recommending the move. The lib
+ * strips the `annual`/`quarterly` prefix from response field names, so e.g.
+ * `annualTotalRevenue` arrives as `totalRevenue`.
+ */
 export async function fetchFinancialStatements(
   symbol: string,
 ): Promise<FinancialStatements | null> {
   const sym = symbol.toUpperCase();
-  const r = await quoteSummary(sym, [
-    "incomeStatementHistory",
-    "balanceSheetHistory",
-    "cashflowStatementHistory",
-  ]);
-  if (!r) return null;
+  // ~5y back gives us 4 annual periods plus a buffer in case the most recent
+  // year hasn't closed yet on Yahoo's side.
+  const period1 = new Date(Date.now() - 5 * 365 * 86_400_000);
+  let rows: FtsAllRow[];
+  try {
+    rows = (await yf.fundamentalsTimeSeries(sym, {
+      period1,
+      type: "annual",
+      module: "all",
+    })) as FtsAllRow[];
+  } catch {
+    return null;
+  }
+  if (!rows || rows.length === 0) return null;
 
-  const inc: Raw[] = r.incomeStatementHistory?.incomeStatementHistory ?? [];
-  const bal: Raw[] = r.balanceSheetHistory?.balanceSheetStatements ?? [];
-  const cf: Raw[] = r.cashflowStatementHistory?.cashflowStatements ?? [];
-  if (inc.length === 0 && bal.length === 0 && cf.length === 0) return null;
+  // Yahoo returns one record per fiscal-year-end timestamp, with all
+  // statement fields merged when `module: "all"`. Group defensively in case
+  // it ever splits.
+  type Bucket = { date: Date } & Record<string, unknown>;
+  const byYear = new Map<number, Bucket>();
+  for (const row of rows) {
+    const d = toDate(row.date);
+    if (!d) continue;
+    const y = d.getUTCFullYear();
+    const existing = byYear.get(y) ?? ({ date: d } as Bucket);
+    byYear.set(y, { ...existing, ...(row as unknown as Bucket), date: d });
+  }
 
-  const yearOf = (v: Raw): number | null => {
-    const d = qsDate(v);
-    return d ? d.getUTCFullYear() : null;
-  };
-  const index = (rows: Raw[]) => {
-    const m = new Map<number, Raw>();
-    for (const row of rows) {
-      const y = yearOf(row.endDate);
-      if (y != null && !m.has(y)) m.set(y, row);
-    }
-    return m;
-  };
-  const incByYear = index(inc);
-  const balByYear = index(bal);
-  const cfByYear = index(cf);
-
-  const years = Array.from(
-    new Set([...incByYear.keys(), ...balByYear.keys(), ...cfByYear.keys()]),
-  )
-    .sort((a, b) => b - a)
-    .slice(0, 4);
+  const years = Array.from(byYear.keys()).sort((a, b) => b - a).slice(0, 4);
+  if (years.length === 0) return null;
 
   const annual: FinancialPeriod[] = years.map((y) => {
-    const i: Raw = incByYear.get(y) ?? {};
-    const b: Raw = balByYear.get(y) ?? {};
-    const c: Raw = cfByYear.get(y) ?? {};
-    const operatingCashflow = qsNum(c.totalCashFromOperatingActivities);
-    const capex = qsNum(c.capitalExpenditures);
-    const longTermDebt = qsNum(b.longTermDebt);
-    const shortLongTermDebt = qsNum(b.shortLongTermDebt);
-    const totalDebt =
-      longTermDebt == null && shortLongTermDebt == null
-        ? null
-        : (longTermDebt ?? 0) + (shortLongTermDebt ?? 0);
+    const r = byYear.get(y)!;
+    const operatingCashflow = num(r.operatingCashFlow);
+    const capex = num(r.capitalExpenditure);
+    const freeCashFlow =
+      num(r.freeCashFlow) ??
+      (operatingCashflow != null ? operatingCashflow + (capex ?? 0) : null);
     return {
-      endDate: qsDate(i.endDate) ?? qsDate(b.endDate) ?? qsDate(c.endDate),
-      totalRevenue: qsNum(i.totalRevenue),
-      grossProfit: qsNum(i.grossProfit),
-      operatingIncome: qsNum(i.operatingIncome),
-      netIncome: qsNum(i.netIncome),
-      totalAssets: qsNum(b.totalAssets),
-      totalLiabilities: qsNum(b.totalLiab),
-      totalEquity: qsNum(b.totalStockholderEquity),
-      cash: qsNum(b.cash),
-      totalDebt,
+      endDate: r.date,
+      totalRevenue: num(r.totalRevenue),
+      grossProfit: num(r.grossProfit),
+      operatingIncome: num(r.operatingIncome),
+      netIncome: num(r.netIncome),
+      totalAssets: num(r.totalAssets),
+      totalLiabilities: num(r.totalLiabilitiesNetMinorityInterest),
+      totalEquity: num(r.stockholdersEquity) ?? num(r.commonStockEquity),
+      cash:
+        num(r.cashAndCashEquivalents) ??
+        num(r.cashCashEquivalentsAndShortTermInvestments),
+      totalDebt: num(r.totalDebt),
       operatingCashflow,
       capex,
-      freeCashflow: operatingCashflow != null ? operatingCashflow + (capex ?? 0) : null,
+      freeCashflow: freeCashFlow,
     };
   });
 
   return { ticker: sym, source: "yahoo", annual };
+}
+
+type FtsAllRow = {
+  // The library's .d.ts says `Date`, but at runtime it stores the unix
+  // timestamp (seconds) directly. The shared `toDate` helper handles both.
+  date: Date | number;
+  [key: string]: unknown;
+};
+
+function num(v: unknown): number | null {
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  return null;
 }

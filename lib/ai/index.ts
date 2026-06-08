@@ -16,11 +16,15 @@ type ProviderName = "openai" | "azure-openai" | "anthropic";
  * Haiku handle the rest. Cuts monthly burn ~4–5× vs running Opus everywhere.
  *
  *   chat       — PM chat with full tool-use. Conviction + multi-step reasoning.
- *   deep       — Quarterly + annual long-form reads. Long context, dense output.
+ *   deep       — Quarterly + annual long-form reads + specialist memos. Long context, dense output.
+ *   router     — CIO conversational front door. Lookups, recall, routing decisions,
+ *                pattern-matching on escalation triggers, tool sequencing. Doesn't
+ *                need Opus depth; Sonnet handles it for ~5x less per token. Distinct
+ *                from `review` because the shape is interactive, not batch.
  *   review     — Daily / weekly portfolio notes. Structured, repetitive shape.
  *   classifier — News severity + thesis-check JSON. One-shot, narrow output.
  */
-export type ModelRole = "chat" | "deep" | "review" | "classifier";
+export type ModelRole = "chat" | "deep" | "router" | "review" | "classifier";
 
 function resolveProvider(): ProviderName {
   const raw = (process.env.AI_PROVIDER ?? "openai").toLowerCase();
@@ -34,7 +38,8 @@ function resolveProvider(): ProviderName {
 /**
  * Per-role defaults. Override any of them via env:
  *   AI_MODEL_CHAT       — what the PM chat uses
- *   AI_MODEL_DEEP       — quarterly + annual reads
+ *   AI_MODEL_DEEP       — quarterly + annual reads, specialist memos
+ *   AI_MODEL_ROUTER     — CIO conversational front door
  *   AI_MODEL_REVIEW     — daily + weekly reviews
  *   AI_MODEL_CLASSIFIER — news + thesis-check
  *
@@ -44,12 +49,14 @@ const ROLE_DEFAULTS: Record<ProviderName, Record<ModelRole, string>> = {
   anthropic: {
     chat: "claude-opus-4-8",
     deep: "claude-opus-4-8",
+    router: "claude-sonnet-4-6",
     review: "claude-sonnet-4-6",
     classifier: "claude-haiku-4-5-20251001",
   },
   openai: {
     chat: "gpt-4o",
     deep: "gpt-4o",
+    router: "gpt-4o-mini",
     review: "gpt-4o-mini",
     classifier: "gpt-4o-mini",
   },
@@ -58,6 +65,7 @@ const ROLE_DEFAULTS: Record<ProviderName, Record<ModelRole, string>> = {
   "azure-openai": {
     chat: process.env.AZURE_OPENAI_DEPLOYMENT ?? "gpt-4o",
     deep: process.env.AZURE_OPENAI_DEPLOYMENT ?? "gpt-4o",
+    router: process.env.AZURE_OPENAI_DEPLOYMENT ?? "gpt-4o",
     review: process.env.AZURE_OPENAI_DEPLOYMENT ?? "gpt-4o",
     classifier: process.env.AZURE_OPENAI_DEPLOYMENT ?? "gpt-4o",
   },
@@ -66,6 +74,7 @@ const ROLE_DEFAULTS: Record<ProviderName, Record<ModelRole, string>> = {
 const ROLE_ENV: Record<ModelRole, string> = {
   chat: "AI_MODEL_CHAT",
   deep: "AI_MODEL_DEEP",
+  router: "AI_MODEL_ROUTER",
   review: "AI_MODEL_REVIEW",
   classifier: "AI_MODEL_CLASSIFIER",
 };

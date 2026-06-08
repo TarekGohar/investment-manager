@@ -42,17 +42,14 @@ export type CreateDecisionEventInput = {
   rule?: AlertRule;
 
   // Decision-grade fields. All optional — a row with no recommendedAction is
-  // treated as a pure notification by the Hub inbox.
+  // treated as a pure notification by the Hub inbox. Three pieces of value:
+  // WHAT (recommendedAction + ticker), WHY (rationale prose), DEGREE
+  // (sizingDetails numbers — targetWeightPct, currentWeightPct,
+  // expectedSharesDelta, expectedDollarDelta).
   recommendedAction?: RecommendedAction | null;
-  actionDetails?: Json | null;
   rationale?: string | null;
-  sizingRationale?: string | null;
   sizingDetails?: Json | null;
-  supportingEvidence?: Json | null;
-  alternativesConsidered?: string | null;
-  invalidationTrigger?: string | null;
   reviewByDate?: Date | null;
-  reviewEvent?: string | null;
   urgency?: DecisionUrgency;
 
   // Source-specific FKs.
@@ -77,15 +74,9 @@ export async function createDecisionEvent(input: CreateDecisionEventInput) {
 
       source: input.source,
       recommendedAction: input.recommendedAction ?? null,
-      actionDetails: jsonOrNull(input.actionDetails),
       rationale: input.rationale ?? null,
-      sizingRationale: input.sizingRationale ?? null,
       sizingDetails: jsonOrNull(input.sizingDetails),
-      supportingEvidence: jsonOrNull(input.supportingEvidence),
-      alternativesConsidered: input.alternativesConsidered ?? null,
-      invalidationTrigger: input.invalidationTrigger ?? null,
       reviewByDate: input.reviewByDate ?? null,
-      reviewEvent: input.reviewEvent ?? null,
       urgency: input.urgency ?? "INFO",
       conversationId: input.conversationId ?? null,
       reviewId: input.reviewId ?? null,

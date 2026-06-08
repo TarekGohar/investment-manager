@@ -49,18 +49,24 @@ export function computeCurrencyExposure(args: {
     { assetsCad: number; cashCad: number; native: number; fxRate: number }
   >();
 
-  // Holdings (assets) — use h.currency + per-row CAD conversion the
-  // enrichment already did.
+  // Holdings (assets) — bucket by `listingCurrency` (the exchange the stock
+  // trades on), NOT `currency` (the accounting currency the cost basis is
+  // booked in). A US stock held in a Canadian registered account with a
+  // CAD-booked basis still carries USD FX exposure on its market value;
+  // accounting currency hides that. `marketValueCad` is already in CAD via
+  // the enrichment layer; the native amount is derived by dividing back out
+  // by the listing-currency FX rate so the 1¢ sensitivity is correct.
   for (const h of args.portfolio.holdings) {
-    const ccy = h.currency || "CAD";
+    const ccy = h.listingCurrency || h.currency || "CAD";
+    const fx = fxRateFor(ccy, args.usdToCadRate);
     const row = byCurrency.get(ccy) ?? {
       assetsCad: 0,
       cashCad: 0,
       native: 0,
-      fxRate: fxRateFor(ccy, args.usdToCadRate),
+      fxRate: fx,
     };
     const mvCad = h.marketValueCad ?? h.costBasisCad;
-    const mvNative = h.marketValue ?? h.costBasis;
+    const mvNative = ccy === "CAD" ? mvCad : fx > 0 ? mvCad / fx : 0;
     row.assetsCad += mvCad;
     row.native += mvNative;
     byCurrency.set(ccy, row);

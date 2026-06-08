@@ -59,6 +59,7 @@ export class AnthropicProvider implements AiProvider {
     messages,
     tools = [],
     maxToolRounds = DEFAULT_TOOL_ROUNDS,
+    maxTokens,
     signal,
   }: StreamChatParams): AsyncGenerator<StreamEvent> {
     const anthroMessages = toAnthropicMessages(messages);
@@ -96,7 +97,7 @@ export class AnthropicProvider implements AiProvider {
           system: cachedSystem,
           messages: anthroMessages,
           tools: anthroTools,
-          max_tokens: DEFAULT_MAX_TOKENS,
+          max_tokens: maxTokens ?? DEFAULT_MAX_TOKENS,
         },
         signal ? { signal } : undefined,
       );

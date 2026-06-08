@@ -176,13 +176,21 @@ export async function commitImportAction(
     return { ok: false, error: "Nothing to import — no rows accepted." };
   }
 
-  // FX rate enrichment for non-CAD rows. Sequential to avoid hammering BoC.
+  // FX rate enrichment. Three cases need a rate captured:
+  //   1. Non-CAD tx (currency='USD' etc.) — straightforward FX-to-CAD.
+  //   2. CAD-tagged tx on a USD-listed stock (RBC pre-converted the
+  //      settlement to CAD for a Canadian-account holding). The CAD price
+  //      stays as-is (broker's actual settlement, CRA-correct basis), but
+  //      we capture USD/CAD at trade date so downstream FX-exposure and
+  //      FTC accounting can reconstruct USD-equivalent values.
+  // Sequential to avoid hammering BoC.
   const fxByKey = new Map<string, number | null>();
   for (const tx of accepted) {
-    if (tx.currency === "CAD") continue;
-    const key = `${tx.currency}:${tx.occurredAt.toISOString().slice(0, 10)}`;
+    const needs = fxLookupNeed(tx);
+    if (!needs) continue;
+    const key = `${needs.currency}:${tx.occurredAt.toISOString().slice(0, 10)}`;
     if (fxByKey.has(key)) continue;
-    const lookup = await getFxRateToCad(tx.currency, tx.occurredAt);
+    const lookup = await getFxRateToCad(needs.currency, tx.occurredAt);
     fxByKey.set(key, lookup?.rate ?? null);
   }
 
@@ -202,8 +210,11 @@ export async function commitImportAction(
       });
 
       const rows = accepted.map((t) => {
-        const fxKey = `${t.currency}:${t.occurredAt.toISOString().slice(0, 10)}`;
-        const fx = t.currency === "CAD" ? null : (fxByKey.get(fxKey) ?? null);
+        const needs = fxLookupNeed(t);
+        const fxKey = needs
+          ? `${needs.currency}:${t.occurredAt.toISOString().slice(0, 10)}`
+          : null;
+        const fx = fxKey ? (fxByKey.get(fxKey) ?? null) : null;
         return {
           userId,
           brokerageId: args.brokerageId,
@@ -342,6 +353,22 @@ function withinTolerance(a: number, b: number, rel: number): boolean {
   if (a === 0 && b === 0) return true;
   const base = Math.max(Math.abs(a), Math.abs(b), 1e-9);
   return Math.abs(a - b) / base < rel;
+}
+
+function isUsdListed(ticker: string): boolean {
+  return !/\.(TO|V|NE|CN)$/.test(ticker.toUpperCase());
+}
+
+/**
+ * Returns the foreign currency whose CAD rate we need to capture, or null
+ * if no FX lookup is needed for this row. CAD on a CAD-listed ticker → no
+ * lookup. CAD on a USD-listed ticker → look up USD (RBC pre-converted the
+ * settlement). Non-CAD → look up the row's currency.
+ */
+function fxLookupNeed(t: ImportableTx): { currency: string } | null {
+  if (t.currency !== "CAD") return { currency: t.currency };
+  if (t.ticker && isUsdListed(t.ticker)) return { currency: "USD" };
+  return null;
 }
 
 function buildImportNotes(translation: ReturnType<typeof translateRbcDi>): string {

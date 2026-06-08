@@ -26,15 +26,13 @@ export type TlhFiredEvent = {
   message: string;
   data: Record<string, unknown>;
   // Decision-grade fields — TLH events graduate to Hub decisions with
-  // HARVEST_LOSS action and full sizing rationale.
+  // HARVEST_LOSS action. The schema-simplified shape: one coherent rationale
+  // (absorbs the falsifier + review trigger as clauses), an optional
+  // reviewByDate for the countdown.
   recommendedAction: "HARVEST_LOSS";
   urgency: "MATERIAL" | "URGENT";
   rationale: string;
-  actionDetails: Record<string, unknown>;
-  supportingEvidence: Record<string, unknown>;
-  invalidationTrigger: string;
   reviewByDate: Date | null;
-  reviewEvent: string | null;
 };
 
 const DEFAULT_MIN_LOSS_CAD = 250;
@@ -120,10 +118,14 @@ function formatTlhEvent(userId: string, c: TlhCandidate): TlhFiredEvent {
   const daysToYearEnd = Math.ceil((yearEnd.getTime() - now.getTime()) / 86_400_000);
   const urgency: "MATERIAL" | "URGENT" = daysToYearEnd <= 30 ? "URGENT" : "MATERIAL";
 
-  const rationale =
+  // One coherent rationale absorbing the why, the falsifier (superficial-loss
+  // rule) as a clause, and the review trigger (tax year-end) as a clause.
+  const baseRationale =
     c.estimatedTaxSaving != null
       ? `Crystallizable loss of ${formatCurrency(lossSize)} in a non-registered account. Estimated tax saving ${formatCurrency(c.estimatedTaxSaving)} at your marginal cap-gains rate. No active superficial-loss window on this ticker.`
       : `Crystallizable loss of ${formatCurrency(lossSize)} in a non-registered account. Tax saving depends on marginal rate (set in Tax profile). No active superficial-loss window on this ticker.`;
+  const rationale =
+    `${baseRationale} I'd reverse this if ${c.ticker} (or an identical security) is bought within 30 days of the sale by you or an affiliated person — that triggers CRA's superficial-loss rule and disallows the loss (added to the replacement's ACB instead). Revisit at tax year-end (${yearEnd.toISOString().slice(0, 10)}) regardless.`;
 
   return {
     userId,
@@ -146,23 +148,6 @@ function formatTlhEvent(userId: string, c: TlhCandidate): TlhFiredEvent {
     recommendedAction: "HARVEST_LOSS",
     urgency,
     rationale,
-    actionDetails: {
-      ticker: c.ticker,
-      quantity: c.nonRegQuantity,
-      account: "NON_REGISTERED",
-      replacementTicker: replacement?.ticker ?? null,
-      replacementLabel: replacement?.label ?? null,
-    },
-    supportingEvidence: {
-      unrealizedLossCad: lossSize,
-      lossPct,
-      acb: c.acb,
-      currentPrice: c.currentPrice,
-      nonRegQuantity: c.nonRegQuantity,
-      estimatedTaxSavingCad: c.estimatedTaxSaving,
-    },
-    invalidationTrigger: `${c.ticker} (or an identical security) is bought within 30 days of the sale by you or an affiliated person — triggering CRA's superficial-loss rule and disallowing the loss (added to the replacement's ACB instead).`,
     reviewByDate: yearEnd,
-    reviewEvent: "Tax year-end",
   };
 }

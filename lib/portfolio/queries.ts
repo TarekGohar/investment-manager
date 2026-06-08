@@ -136,9 +136,13 @@ export async function getEnrichedPortfolio(userId: string): Promise<EnrichedPort
   // Canadian brokerages do on their summary pages. The rate is fetched
   // once if any non-CAD position exists.
   const today = new Date();
-  const hasNonCadPosition = summary.holdings.some((h) => h.currency !== "CAD");
+  // Use listing currency (not accounting currency) to decide whether we
+  // need a USD/CAD rate. A CAD-booked USD-listed position still needs the
+  // quote converted; checking only accounting currency would skip the fetch
+  // and silently render with a 1.0 factor.
+  const hasNonCadPosition = summary.holdings.some((h) => h.listingCurrency !== "CAD");
   const hasNonUsdForeign = summary.holdings.some(
-    (h) => h.currency !== "CAD" && h.currency !== "USD",
+    (h) => h.listingCurrency !== "CAD" && h.listingCurrency !== "USD",
   );
   if (hasNonUsdForeign) {
     console.warn(

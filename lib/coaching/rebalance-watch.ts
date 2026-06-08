@@ -24,9 +24,6 @@ export type RebalanceFiredEvent = {
   recommendedAction: "REBALANCE";
   urgency: "MATERIAL";
   rationale: string;
-  actionDetails: Record<string, unknown>;
-  supportingEvidence: Record<string, unknown>;
-  invalidationTrigger: string;
 };
 
 const DEFAULT_MIN_CONSECUTIVE_DAYS = 3;
@@ -146,7 +143,9 @@ function formatRebalanceEvent(
 
   const message = `${headline} ${action}`;
 
-  const rationale = `${breach.category} bucket is ${isOverweight ? "above" : "below"} target by ${Math.abs(breach.driftPct).toFixed(1)}pp (${breach.actualPct.toFixed(1)}% actual vs ${breach.targetPct.toFixed(1)}% target). Sustained breach across snapshots — not single-day noise. ${mirror ? `Pair with ${mirror.category} which is the most-opposite drift.` : `No clear mirror bucket; deploy to/from cash.`}`;
+  // One coherent rationale absorbing the why, the falsifier as a clause,
+  // and the pair-leg suggestion when present.
+  const rationale = `${breach.category} bucket is ${isOverweight ? "above" : "below"} target by ${Math.abs(breach.driftPct).toFixed(1)}pp (${breach.actualPct.toFixed(1)}% actual vs ${breach.targetPct.toFixed(1)}% target). Sustained breach across snapshots — not single-day noise. ${mirror ? `Pair with ${mirror.category} which is the most-opposite drift.` : `No clear mirror bucket; deploy to/from cash.`} I'd reverse this if ${breach.category} drifts back inside the threshold on its own (via price moves), or if you record a corresponding TRIM/BUY transaction that closes the gap.`;
 
   return {
     userId,
@@ -168,22 +167,6 @@ function formatRebalanceEvent(
     recommendedAction: "REBALANCE",
     urgency: "MATERIAL",
     rationale,
-    actionDetails: {
-      breachedCategory: breach.category,
-      direction,
-      mirrorCategory: mirror?.category ?? null,
-      driftDollars,
-    },
-    supportingEvidence: {
-      actualPct: breach.actualPct,
-      targetPct: breach.targetPct,
-      driftPct: breach.driftPct,
-      driftDollars,
-      totalMarketValue,
-      mirrorActualPct: mirror?.actualPct ?? null,
-      mirrorTargetPct: mirror?.targetPct ?? null,
-    },
-    invalidationTrigger: `${breach.category} drifts back inside the threshold on its own (via price moves), OR you record a corresponding TRIM/BUY transaction that closes the gap.`,
   };
 }
 

@@ -13,24 +13,58 @@ import type { PortfolioSnapshotRow } from "./snapshots";
 export type DailyReturn = { date: Date; r: number };
 
 /** Convert a snapshot series to daily returns based on totalMarketValue,
- *  accounting for "external cash flows" between days (net new money in).
- *  External flows on a given day are inferred from changes in totalCost
- *  (cost basis only changes when you buy/sell or DRIP). For DRIP the cost
- *  basis goes up but it isn't external — to keep this honest we treat any
- *  cost-basis jump >0 between days as external inflow (overstates flows
- *  slightly on DRIP days). For TWR the bias is small and conservative.
+ *  netting out external cash flows IN and OUT of positions between days.
+ *
+ *  Flows are derived from `transactions`, not snapshot cost-basis diffs.
+ *  Inflows to positions (BUY, TRANSFER_IN, DRIP) increase the denominator
+ *  and are subtracted from the numerator. Outflows from positions (SELL,
+ *  TRANSFER_OUT) are subtracted from the numerator (negative `netFlow`).
+ *  DIVIDEND received goes to cash, not positions, so it isn't a flow here.
+ *
+ *  The earlier inference-from-totalCost approach broke in two ways: SELLS
+ *  were never subtracted (Math.max(0, …) zeroed them), making sell days
+ *  look like negative-return days; and the "DRIP-as-external" treatment
+ *  systematically biased TWR downward on portfolios with reinvested
+ *  dividends. Both effects compound across a year to a several-percent
+ *  understatement vs IRR.
  */
 export function dailyReturnsFromSnapshots(
   snapshots: PortfolioSnapshotRow[],
+  transactions: Tx[],
 ): DailyReturn[] {
+  // Bucket flows by ISO date (UTC). Snapshot dates are start-of-UTC-day, so
+  // a flow whose `occurredAt` falls in day D contributes to the return
+  // between snapshots[D-1] and snapshots[D].
+  const flowsByIso = new Map<string, number>();
+  for (const tx of transactions) {
+    const iso = tx.occurredAt.toISOString().slice(0, 10);
+    let flow = 0;
+    if (tx.kind === "BUY" || tx.kind === "TRANSFER_IN") {
+      flow = tx.quantity * tx.price + tx.fees;
+    } else if (tx.kind === "SELL" || tx.kind === "TRANSFER_OUT") {
+      flow = -(tx.quantity * tx.price - tx.fees);
+    }
+    // DIVIDEND, SPLIT, etc. are not external flows to positions.
+    if (flow !== 0) {
+      flowsByIso.set(iso, (flowsByIso.get(iso) ?? 0) + flow);
+    }
+  }
+
   const out: DailyReturn[] = [];
   for (let i = 1; i < snapshots.length; i++) {
     const prev = snapshots[i - 1];
     const cur = snapshots[i];
-    const flow = Math.max(0, cur.totalCost - prev.totalCost); // contributions
-    const denom = prev.totalMarketValue + flow;
+    // Sum flows that occurred AFTER prev.date through cur.date.
+    let netFlow = 0;
+    const startMs = prev.date.getTime();
+    const endMs = cur.date.getTime();
+    for (const [iso, f] of flowsByIso) {
+      const t = Date.parse(iso + "T00:00:00.000Z");
+      if (t > startMs && t <= endMs) netFlow += f;
+    }
+    const denom = prev.totalMarketValue + Math.max(0, netFlow);
     if (denom <= 0) continue;
-    const r = (cur.totalMarketValue - prev.totalMarketValue - flow) / denom;
+    const r = (cur.totalMarketValue - prev.totalMarketValue - netFlow) / denom;
     out.push({ date: cur.date, r });
   }
   return out;
