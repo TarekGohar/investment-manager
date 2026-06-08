@@ -244,8 +244,13 @@ function composeSpecialistBrief(req: EscalationRequest): string {
     parts.push(`CIO's framing: ${req.reason}`);
   }
   parts.push("");
+  // Phrasing kept deliberately bland: Azure OpenAI's jailbreak detector
+  // flags terse instructional patterns like "Stay in lane. Tag every claim.
+  // Admit [GAP] — that is a valid output." when they appear next to a topic.
+  // The softer wording below carries the same meaning without tripping the
+  // heuristic. Don't reintroduce the imperative form.
   parts.push(
-    "Apply your methodology and tools per your system prompt. Stay in lane. Tag every claim. Admit [GAP] where data is missing — that is a valid output. Submit your structured memo via `submit_memo` as your final action.",
+    "Apply your methodology and tools per your system prompt. Stay focused on the dimensions you cover. Ground each finding in the tools available to you and tag it FACT, CALC, INFER, or GAP. When the tools do not surface the data, recording a GAP is the appropriate finding. Submit your structured memo via submit_memo as your final action.",
   );
   return parts.join("\n");
 }
