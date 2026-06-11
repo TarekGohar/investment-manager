@@ -130,9 +130,12 @@ export function ChatMenu({
   const [pending, startTransition] = useTransition();
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
-  // The menu opens upward from a button near the bottom of the screen, so cap
-  // its height to the space actually above the trigger — otherwise a long
-  // recent-chats list spills off the top of the viewport and can't be reached.
+  // The menu opens upward from a button near the bottom of the screen. The
+  // hard cap is the space above the trigger (otherwise the top of the list
+  // spills off the viewport), but we also clamp to ~half the viewport so the
+  // "New chat" row at the top of the menu stays in easy thumb reach — at the
+  // raw trigger.top a long history pushes it all the way up under the
+  // browser's URL bar where it's hard or impossible to tap.
   const [maxHeight, setMaxHeight] = useState<number | undefined>(undefined);
 
   useEffect(() => {
@@ -140,8 +143,9 @@ export function ChatMenu({
     function measure() {
       const el = triggerRef.current;
       if (!el) return;
-      // top of trigger, minus the mb-2 gap and a small breathing margin.
-      setMaxHeight(Math.max(180, el.getBoundingClientRect().top - 16));
+      const aboveTrigger = el.getBoundingClientRect().top - 16;
+      const halfViewport = window.innerHeight * 0.5;
+      setMaxHeight(Math.max(180, Math.min(aboveTrigger, halfViewport)));
     }
     measure();
     window.addEventListener("resize", measure);
@@ -175,7 +179,7 @@ export function ChatMenu({
           />
           <div
             style={maxHeight ? { maxHeight } : undefined}
-            className="absolute bottom-full left-0 z-30 mb-2 flex max-h-[70dvh] w-[min(280px,calc(100vw-2rem))] flex-col overflow-hidden rounded-[16px] border border-border bg-bg shadow-xl">
+            className="absolute bottom-full left-0 z-30 mb-2 flex max-h-[50dvh] w-[min(280px,calc(100vw-2rem))] flex-col overflow-hidden rounded-[16px] border border-border bg-bg shadow-xl">
             <div className="border-b border-border p-2">
               <button
                 type="button"
