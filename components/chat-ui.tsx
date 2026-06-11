@@ -262,6 +262,10 @@ export function ChatUI({
     // see `streaming: true` for one tick and wrongly fire `reconcileFromServer`,
     // wiping client-only state like the panel-confirm button.
     let receivedDone = false;
+    // Same race for `error`: an explicit error frame means the server failed
+    // *and* did not persist an assistant message, so reconciling would refetch
+    // the DB and silently delete the error pill we just rendered.
+    let receivedError = false;
 
     await streamChat(
       text,
@@ -270,6 +274,7 @@ export function ChatUI({
       controller.signal,
       (event, data) => {
         if (event === "done") receivedDone = true;
+        if (event === "error") receivedError = true;
         setMessages((current) =>
           current.map((m) => {
             if (m.id !== assistantId || m.role !== "assistant") return m;
@@ -373,11 +378,15 @@ export function ChatUI({
     // instead of a stranded error pill.
     const wasUserStopped = userStoppedRef.current;
     userStoppedRef.current = false;
-    // Only reconcile when the stream did NOT signal a clean `done`. A clean
-    // done means the server finished and persisted on its own; reconciling
-    // would refetch the persisted message (which lacks client-only state
-    // like the panel-confirm card) and clobber what's on screen.
-    if (!wasUserStopped && !receivedDone) {
+    // Only reconcile when the stream did NOT signal a clean `done` and the
+    // server did NOT explicitly report an error. A clean done means the
+    // server finished and persisted on its own; reconciling would refetch the
+    // persisted message (which lacks client-only state like the panel-confirm
+    // card) and clobber what's on screen. An explicit error means the server
+    // gave up before persisting any assistant message, so reconciling would
+    // refetch a DB state that has no assistant row at all and wipe the
+    // error pill the user needs to see.
+    if (!wasUserStopped && !receivedDone && !receivedError) {
       void reconcileFromServer();
     }
   }

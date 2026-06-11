@@ -106,20 +106,28 @@ export async function POST(req: Request) {
           }
         | undefined;
       let finishReason: string | undefined;
+      // Track whether anything actually streamed to the client. If the upstream
+      // call throws before any text or tool call lands, we can safely retry
+      // with a trimmed history; if something already streamed we cannot,
+      // because the partial output is already on screen and replaying tool
+      // results out of context would break protocol.
+      let streamedAnything = false;
 
-      try {
+      const drainStream = async (msgs: ChatMessage[]) => {
         for await (const ev of provider.streamChat({
           model,
           system: PM_PERSONA,
-          messages,
+          messages: msgs,
           tools,
           signal: aborter.signal,
         })) {
           switch (ev.type) {
             case "text":
+              streamedAnything = true;
               send("text", { delta: ev.delta });
               break;
             case "tool_call":
+              streamedAnything = true;
               send("tool_call", { id: ev.id, name: ev.name });
               toolMeta.set(ev.id, { name: ev.name, result: "" });
               break;
@@ -156,6 +164,31 @@ export async function POST(req: Request) {
               send("error", { error: ev.error });
               break;
           }
+        }
+      };
+
+      try {
+        try {
+          await drainStream(messages);
+        } catch (err) {
+          // Azure OpenAI's RAI layer 400s when its jailbreak / content
+          // management heuristic flags the prompt. Once a long panel
+          // synthesis is in history, even a benign user follow-up replays
+          // that text and re-trips the filter. If nothing has streamed yet
+          // we can recover by retrying with just the last user turn (the
+          // panel memo lives in the UI anyway — the user can re-cite it
+          // explicitly if they need to). Bail out for any other error or
+          // if we're already mid-stream.
+          if (!isAzureContentFilter400(err) || streamedAnything || aborter.signal.aborted) {
+            throw err;
+          }
+          const trimmed = trimToLastUserTurn(messages);
+          if (!trimmed) throw err;
+          send("warning", {
+            reason:
+              "Azure's content filter blocked the full conversation context. Retrying with just your latest message — earlier turns won't be visible to the model.",
+          });
+          await drainStream(trimmed);
         }
 
         // If the model didn't finish cleanly, surface a one-line warning to
@@ -226,8 +259,7 @@ export async function POST(req: Request) {
           // happened on the assistant side (the user message remains).
           send("done", { aborted: true });
         } else {
-          const message = err instanceof Error ? err.message : "Stream failed";
-          send("error", { error: message });
+          send("error", { error: friendlyErrorMessage(err) });
         }
         if (!clientGone) controller.close();
       } finally {
@@ -250,6 +282,54 @@ export async function POST(req: Request) {
       "X-Accel-Buffering": "no",
     },
   });
+}
+
+/**
+ * Azure OpenAI returns HTTP 400 with a message like
+ *   "The response was filtered due to the prompt triggering Azure OpenAI's
+ *    content management policy"
+ * (or an inner `jailbreak.detected = true`) when its RAI heuristic flags the
+ * input. The OpenAI SDK surfaces this as an `APIError` with `status === 400`
+ * — but the SDK is dependency-injected via the provider, so we duck-type on
+ * the shape rather than importing it here.
+ */
+function isAzureContentFilter400(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  const e = err as { status?: number; message?: string };
+  const msg = typeof e.message === "string" ? e.message.toLowerCase() : "";
+  if (e.status !== 400) {
+    // Some Azure clients wrap the HTTP error and lose the status, so accept a
+    // text-only match too. Both forms include one of these phrases.
+    return msg.includes("content management policy") || msg.includes("jailbreak");
+  }
+  return (
+    msg.includes("content management policy") ||
+    msg.includes("content_filter") ||
+    msg.includes("jailbreak") ||
+    msg.includes("responsibleai")
+  );
+}
+
+function friendlyErrorMessage(err: unknown): string {
+  if (isAzureContentFilter400(err)) {
+    return "Azure's content filter blocked this turn. Try rephrasing, or open a new chat to drop the prior context.";
+  }
+  return err instanceof Error ? err.message : "Stream failed";
+}
+
+/**
+ * Returns a history that contains only the most recent user message, or null
+ * if there is no user message to keep. Used to recover from a content-filter
+ * 400 by replaying the user's question without the (filter-tripping) earlier
+ * turns. Tool messages without their calling assistant would be invalid, so
+ * we drop them too.
+ */
+function trimToLastUserTurn(history: ChatMessage[]): ChatMessage[] | null {
+  for (let i = history.length - 1; i >= 0; i--) {
+    const m = history[i];
+    if (m.role === "user") return [m];
+  }
+  return null;
 }
 
 function normalizeScope(raw: string | undefined): string {
