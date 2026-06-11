@@ -110,22 +110,12 @@ export async function POST(req: Request) {
         errors: panelResult.errors,
       });
 
-      // Persist each memo summary as a tool-style message so the conversation
-      // transcript shows what the panel returned. Real memo content lives in
-      // SpecialistMemo (saved by runPanel via the store).
-      for (const memo of panelResult.memos) {
-        await saveToolMessage(
-          conversationId,
-          `panel-memo-${memo.specialist}-${Date.now()}`,
-          `panel:${memo.specialist}`,
-          JSON.stringify({
-            conclusion: memo.conclusion,
-            confidence: memo.confidence,
-            findingsCount: memo.findings.length,
-            gapsCount: memo.dataGaps.length,
-          }),
-        );
-      }
+      // We used to persist each memo summary as a bare `tool` row here for
+      // transcript completeness, but the UI filters tool messages out of the
+      // display and OpenAI 400s when a `tool` row appears in history without
+      // a preceding assistant `tool_calls`. The full memo lives in
+      // SpecialistMemo (saved by runPanel via the store); the synthesis text
+      // captures the panel's conclusion in the chat transcript on its own.
 
       if (panelResult.memos.length === 0) {
         send("error", {

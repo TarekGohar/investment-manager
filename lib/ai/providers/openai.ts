@@ -208,27 +208,45 @@ type OpenAiMessage = OpenAI.Chat.Completions.ChatCompletionMessageParam;
 
 function toOpenAiMessages(system: string, history: ChatMessage[]): OpenAiMessage[] {
   const out: OpenAiMessage[] = [{ role: "system", content: system }];
+  // OpenAI enforces that every `tool` message follows an `assistant` message
+  // whose `tool_calls` array includes that `tool_call_id`. The panel-confirm
+  // route persists freestanding `tool` rows (`panel-memo-*`) for transcript
+  // purposes that have no calling assistant — replaying them verbatim trips a
+  // 400 ("messages with role 'tool' must be a response to a preceeding
+  // message with 'tool_calls'"). Track the set of currently-open tool_call
+  // IDs and silently drop any orphan tool messages from the replay. The
+  // assistant synthesis text is persisted as a separate row, so the model
+  // still sees the panel's conclusion.
+  const openToolCallIds = new Set<string>();
   for (const m of history) {
     if (m.role === "user") {
       out.push({ role: "user", content: m.text });
+      openToolCallIds.clear();
       continue;
     }
     if (m.role === "assistant") {
+      const calls = m.toolCalls && m.toolCalls.length > 0 ? m.toolCalls : undefined;
       out.push({
         role: "assistant",
         content: m.text || null,
-        tool_calls:
-          m.toolCalls && m.toolCalls.length > 0
-            ? m.toolCalls.map((tc) => ({
-                id: tc.id,
-                type: "function" as const,
-                function: { name: tc.name, arguments: tc.arguments },
-              }))
-            : undefined,
+        tool_calls: calls
+          ? calls.map((tc) => ({
+              id: tc.id,
+              type: "function" as const,
+              function: { name: tc.name, arguments: tc.arguments },
+            }))
+          : undefined,
       });
+      if (calls) {
+        for (const tc of calls) openToolCallIds.add(tc.id);
+      } else {
+        openToolCallIds.clear();
+      }
       continue;
     }
     if (m.role === "tool") {
+      if (!openToolCallIds.has(m.toolCallId)) continue;
+      openToolCallIds.delete(m.toolCallId);
       out.push({
         role: "tool",
         tool_call_id: m.toolCallId,
